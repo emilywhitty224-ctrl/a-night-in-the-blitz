@@ -109,6 +109,40 @@
       }
     });
 
+    // ── Brightness cycle — right B button cycles through scene presets ───
+    AFRAME.registerComponent('brightness-cycle', {
+      init: function () {
+        var presets = [
+          { label:'very dark',  ambient:0.08,  torch:80  },
+          { label:'dark',       ambient:0.18,  torch:160 },
+          { label:'medium',     ambient:0.35,  torch:280 },
+          { label:'bright',     ambient:0.6,   torch:450 }
+        ];
+        var idx = 1; // start on 'dark'
+        function bind() {
+          var rightCtrl = document.querySelector('[oculus-touch-controls*="right"]');
+          if (!rightCtrl) { setTimeout(bind, 500); return; }
+          rightCtrl.addEventListener('bbuttondown', function () {
+            try {
+              idx = (idx + 1) % presets.length;
+              var p = presets[idx];
+              var ambient = document.getElementById('scene-ambient');
+              if (ambient) ambient.setAttribute('light', 'intensity', p.ambient);
+              var torchEl = document.getElementById('torch-point');
+              if (torchEl) torchEl.setAttribute('light', 'intensity', p.torch);
+              // Short double-buzz so you know it changed
+              var gp = rightCtrl.components['oculus-touch-controls'];
+              if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+                gp.controller.hapticActuators[0].pulse(0.3, 40);
+              }
+              console.log('[brightness] preset:', p.label);
+            } catch(e) {}
+          });
+        }
+        bind();
+      }
+    });
+
     // ── Torch toggle — right A button ─────────────────────────────────────
     AFRAME.registerComponent('torch-toggle', {
       init: function () {
@@ -188,7 +222,7 @@
     <a-entity oculus-touch-controls="hand: left; model: false"></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle>
+              torch-toggle brightness-cycle>
       <!-- Torch model — held in right hand, points forward (-Z) -->
       <a-entity id="torch" position="0 -0.02 -0.05" rotation="-90 0 0">
         <!-- Bounce fill and moonlight inside torch so they toggle off with it -->
