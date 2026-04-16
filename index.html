@@ -43,28 +43,27 @@
                 if (mat.lightMap) mat.lightMap = null;
                 mat.lightMapIntensity = 0;
                 if (mat.envMap) mat.envMap = null;
-                // MeshBasicMaterial ignores scene lighting entirely — convert to Standard
-                // so the material responds to the torch and moonlight
+                // Darken diffuse — applies to all material types
+                if (mat.color) mat.color.multiplyScalar(0.15);
+                // MeshBasicMaterial ignores scene lights — convert to Standard
+                // so torch and moonlight can illuminate it
                 if (mat.type === 'MeshBasicMaterial') {
-                  var replacement = new THREE.MeshStandardMaterial({
+                  node.material = new THREE.MeshStandardMaterial({
                     map: mat.map,
                     color: mat.color.clone(),
                     roughness: 1.0,
                     metalness: 0.0,
+                    side: THREE.DoubleSide,
                     transparent: mat.transparent,
                     opacity: mat.opacity,
-                    alphaTest: mat.alphaTest,
-                    side: mat.side
+                    alphaTest: mat.alphaTest
                   });
-                  replacement.color.multiplyScalar(0.15);
-                  node.material = replacement;
                 } else {
-                  if (mat.color) mat.color.multiplyScalar(0.15);
                   mat.needsUpdate = true;
                 }
               });
             });
-          } catch(e) { console.warn('night-darken error:', e); }
+          } catch(err) { console.warn('night-darken error:', err); }
         });
       }
     });
@@ -167,7 +166,7 @@
   <a-sky color="#010306"></a-sky>
 
   <!-- Lighting -->
-  <a-light type="ambient" color="#0a0f1a" intensity="0.08"></a-light>
+  <a-light id="scene-ambient" type="ambient" color="#0a0f1a" intensity="0.25"></a-light>
   <!-- Moonlight — gentle cool blue-white directional from high right behind player -->
   <a-light type="directional" color="#c8d8ff" intensity="0.04"
            position="4 10 6"></a-light>
@@ -195,13 +194,11 @@
         <!-- Bounce fill and moonlight inside torch so they toggle off with it -->
         <a-entity light="type:point; color:#ff7700; intensity:0.5; distance:6; decay:1" position="0 0 0"></a-entity>
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 180" position="0 0 0"></a-entity>
-        <!-- Spotlight target — far along torch forward axis so beam follows hand -->
-        <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
-        <!-- Main spotlight beam — narrow cone gives a circle on surfaces -->
-        <a-entity light="type:spot; color:#ff7700; intensity:160; distance:35; decay:1; angle:10; penumbra:0.3; target:#torch-beam-target"
-                  torch-flicker="base:160; range:0.5; speed:4"
+        <!-- Torch GLB model — rotation="0 0 0" uses native GLB orientation -->
+        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="0 0 0" position="0 0 0"></a-entity>
+        <!-- Main point light — omnidirectional so it always lights nearby geometry -->
+        <a-entity id="torch-point" light="type:point; color:#ff7700; intensity:160; distance:35; decay:1"
+                  torch-flicker="base:160; range:2; speed:4"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
@@ -210,5 +207,66 @@
 
 </a-scene>
 <div id="version-overlay">v17</div>
+
+<!-- ── Debug panel — desktop only, hidden in VR ──────────────────────── -->
+<div id="debug-panel" style="
+  position:fixed; top:12px; left:12px; z-index:9999;
+  background:rgba(0,0,0,0.82); color:#eee; font-family:monospace; font-size:13px;
+  padding:12px 16px; border-radius:6px; min-width:260px;
+  display:block;">
+  <b style="color:#ffaa44">Lighting debug</b>
+  <div style="margin-top:8px">
+    Ambient:
+    <input id="dbg-ambient" type="range" min="0" max="1" step="0.01" value="0.25" style="width:120px">
+    <span id="dbg-ambient-val">0.25</span>
+  </div>
+  <div style="margin-top:4px">
+    Torch intensity:
+    <input id="dbg-torch" type="range" min="0" max="600" step="1" value="160" style="width:120px">
+    <span id="dbg-torch-val">160</span>
+  </div>
+  <div style="margin-top:4px">
+    Torch range (m):
+    <input id="dbg-range" type="range" min="1" max="60" step="1" value="35" style="width:120px">
+    <span id="dbg-range-val">35</span>
+  </div>
+  <div style="margin-top:4px">
+    Moon intensity:
+    <input id="dbg-moon" type="range" min="0" max="0.5" step="0.005" value="0.04" style="width:120px">
+    <span id="dbg-moon-val">0.04</span>
+  </div>
+  <div style="margin-top:8px; color:#888; font-size:11px">Panel hidden when entering VR</div>
+</div>
+<script>
+  // Hide panel in VR, show when leaving
+  document.querySelector('a-scene').addEventListener('enter-vr', function() {
+    document.getElementById('debug-panel').style.display = 'none';
+  });
+  document.querySelector('a-scene').addEventListener('exit-vr', function() {
+    document.getElementById('debug-panel').style.display = 'block';
+  });
+
+  function dbgBind(sliderId, valId, update) {
+    var s = document.getElementById(sliderId);
+    var v = document.getElementById(valId);
+    s.addEventListener('input', function() { v.textContent = s.value; update(parseFloat(s.value)); });
+  }
+  dbgBind('dbg-ambient', 'dbg-ambient-val', function(val) {
+    var el = document.getElementById('scene-ambient');
+    if (el) el.setAttribute('light', 'intensity', val);
+  });
+  dbgBind('dbg-torch', 'dbg-torch-val', function(val) {
+    var el = document.getElementById('torch-point');
+    if (el) { el.setAttribute('light', 'intensity', val); el.components['torch-flicker'].data.base = val; }
+  });
+  dbgBind('dbg-range', 'dbg-range-val', function(val) {
+    var el = document.getElementById('torch-point');
+    if (el) el.setAttribute('light', 'distance', val);
+  });
+  dbgBind('dbg-moon', 'dbg-moon-val', function(val) {
+    var els = document.querySelectorAll('a-light[type="directional"]');
+    if (els[0]) els[0].setAttribute('light', 'intensity', val);
+  });
+</script>
 </body>
 </html>
