@@ -196,12 +196,12 @@
         <a-entity light="type:point; color:#ff7700; intensity:0.5; distance:6; decay:1" position="0 0 0"></a-entity>
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
         <!-- Torch GLB model -->
-        <a-entity gltf-model="#torch-glb" scale="0.05 0.05 0.05" rotation="0 180 0" position="0 0 0"></a-entity>
+        <a-entity gltf-model="#torch-glb" scale="0.10 0.10 0.10" rotation="0 180 0" position="0 0 0"></a-entity>
         <!-- Spotlight target — far along torch forward axis so beam follows hand -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Main spotlight beam — narrow cone gives a circle on surfaces -->
-        <a-entity light="type:spot; color:#ff7700; intensity:16; distance:12; decay:1; angle:10; penumbra:0.3; target:#torch-beam-target"
-                  torch-flicker="base:16; range:0.5; speed:4"
+        <a-entity light="type:spot; color:#ff7700; intensity:160; distance:12; decay:1; angle:10; penumbra:0.3; target:#torch-beam-target"
+                  torch-flicker="base:160; range:0.5; speed:4"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
