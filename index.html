@@ -160,7 +160,7 @@
 
     <a-entity id="cam" camera look-controls position="0 1.6 0">
       <!-- Bounce fill: warm light already reflected off nearby walls/floor -->
-      <a-entity light="type:point; color:#ff6600; intensity:0.12; distance:6; decay:1" position="0 -0.4 0"></a-entity>
+      <a-entity light="type:point; color:#ffeeaa; intensity:0.12; distance:6; decay:1" position="0 -0.4 0"></a-entity>
       <!-- Moonlight: faint cool rim on upward-facing surfaces -->
       <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
     </a-entity>
@@ -169,34 +169,44 @@
 
     <a-entity oculus-touch-controls="hand: right; model: false"
               torch-toggle>
-      <!-- Carried torch -->
-      <a-entity id="torch" position="0 0.05 -0.08" rotation="40 0 0">
-        <a-cylinder radius="0.018" height="0.28"
-                    material="color:#3b1f0a; roughness:0.9; metalness:0"></a-cylinder>
-        <a-cylinder radius="0.022" height="0.015"
-                    material="color:#1a0d00; roughness:0.8; metalness:0.1"
-                    position="0 0.08 0"></a-cylinder>
-        <a-cylinder radius="0.022" height="0.015"
-                    material="color:#1a0d00; roughness:0.8; metalness:0.1"
-                    position="0 -0.05 0"></a-cylinder>
-        <a-cylinder radius="0.028" height="0.07"
-                    material="color:#1a1005; roughness:1; metalness:0"
-                    position="0 0.175 0"></a-cylinder>
-        <a-sphere radius="0.04"
-                  material="color:#ff6600; emissive:#ff4400; emissiveIntensity:1; shader:flat; transparent:true; opacity:0.9"
-                  position="0 0.225 0"></a-sphere>
-        <a-sphere radius="0.022"
-                  material="color:#ffdd44; emissive:#ffcc00; emissiveIntensity:1; shader:flat; transparent:true; opacity:0.85"
-                  position="0 0.232 0"></a-sphere>
-        <a-entity light="type:point; color:#ff8822; intensity:0.9; distance:9; decay:1"
-                  torch-flicker="base:0.9; range:0.35; speed:9"
-                  position="0 0.24 0"></a-entity>
+      <!-- Blackout electric torch — points forward (-Z), held like a flashlight -->
+      <a-entity id="torch" position="0 -0.02 -0.05" rotation="90 0 0">
+        <!-- Main body — dark gunmetal tube -->
+        <a-cylinder radius="0.022" height="0.15"
+                    material="color:#1c1c1c; roughness:0.35; metalness:0.85"
+                    position="0 0 0"></a-cylinder>
+        <!-- Grip ridges -->
+        <a-cylinder radius="0.024" height="0.008"
+                    material="color:#111111; roughness:0.4; metalness:0.8"
+                    position="0 -0.04 0"></a-cylinder>
+        <a-cylinder radius="0.024" height="0.008"
+                    material="color:#111111; roughness:0.4; metalness:0.8"
+                    position="0 -0.02 0"></a-cylinder>
+        <a-cylinder radius="0.024" height="0.008"
+                    material="color:#111111; roughness:0.4; metalness:0.8"
+                    position="0 0.00 0"></a-cylinder>
+        <!-- Head — wider, slightly forward -->
+        <a-cylinder radius="0.030" height="0.045"
+                    material="color:#111111; roughness:0.3; metalness:0.9"
+                    position="0 0.098 0"></a-cylinder>
+        <!-- Outer lens ring -->
+        <a-cylinder radius="0.033" height="0.006"
+                    material="color:#222222; roughness:0.2; metalness:1.0"
+                    position="0 0.122 0"></a-cylinder>
+        <!-- Lens glass — faint yellow glow -->
+        <a-cylinder radius="0.026" height="0.005"
+                    material="color:#ffffcc; emissive:#ffee88; emissiveIntensity:0.6; shader:flat; transparent:true; opacity:0.92"
+                    position="0 0.126 0"></a-cylinder>
+        <!-- Light — pale yellow, points forward from lens -->
+        <a-entity light="type:point; color:#ffeeaa; intensity:0.9; distance:9; decay:1"
+                  torch-flicker="base:0.9; range:0.12; speed:4"
+                  position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
 
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v12</div>
+<div id="version-overlay">v13</div>
 </body>
 </html>
