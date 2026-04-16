@@ -113,10 +113,10 @@
     AFRAME.registerComponent('brightness-cycle', {
       init: function () {
         var presets = [
-          { label:'very dark',  ambient:0.08,  torch:80  },
-          { label:'dark',       ambient:0.18,  torch:160 },
-          { label:'medium',     ambient:0.35,  torch:280 },
-          { label:'bright',     ambient:0.6,   torch:450 }
+          { label:'very dark',  ambient:0.06,  torch:120 },
+          { label:'dark',       ambient:0.12,  torch:220 },
+          { label:'medium',     ambient:0.25,  torch:360 },
+          { label:'bright',     ambient:0.5,   torch:500 }
         ];
         var idx = 1; // start on 'dark'
         function bind() {
@@ -200,7 +200,7 @@
   <a-sky color="#010306"></a-sky>
 
   <!-- Lighting -->
-  <a-light id="scene-ambient" type="ambient" color="#0a0f1a" intensity="0.25"></a-light>
+  <a-light id="scene-ambient" type="ambient" color="#0a0f1a" intensity="0.12"></a-light>
   <!-- Moonlight — gentle cool blue-white directional from high right behind player -->
   <a-light type="directional" color="#c8d8ff" intensity="0.04"
            position="4 10 6"></a-light>
@@ -233,8 +233,8 @@
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#ff7700; intensity:160; distance:25; decay:1; angle:12; penumbra:0.3; target:#torch-beam-target"
-                  torch-flicker="base:160; range:2; speed:4"
+        <a-entity id="torch-point" light="type:spot; color:#ff8833; intensity:220; distance:18; decay:2; angle:28; penumbra:0.55; target:#torch-beam-target"
+                  torch-flicker="base:220; range:8; speed:3"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
@@ -253,13 +253,13 @@
   <b style="color:#ffaa44">Lighting debug</b>
   <div style="margin-top:8px">
     Ambient:
-    <input id="dbg-ambient" type="range" min="0" max="1" step="0.01" value="0.25" style="width:120px">
-    <span id="dbg-ambient-val">0.25</span>
+    <input id="dbg-ambient" type="range" min="0" max="1" step="0.01" value="0.12" style="width:120px">
+    <span id="dbg-ambient-val">0.12</span>
   </div>
   <div style="margin-top:4px">
     Torch intensity:
-    <input id="dbg-torch" type="range" min="0" max="600" step="1" value="160" style="width:120px">
-    <span id="dbg-torch-val">160</span>
+    <input id="dbg-torch" type="range" min="0" max="600" step="1" value="220" style="width:120px">
+    <span id="dbg-torch-val">220</span>
   </div>
   <div style="margin-top:4px">
     Torch range (m):
