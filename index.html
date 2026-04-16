@@ -100,6 +100,11 @@
               _on = !_on;
               var torch = document.querySelector('#torch');
               if (torch) torch.setAttribute('visible', _on ? 'true' : 'false');
+              // Haptic buzz — short click feel
+              var gp = rightCtrl.components['oculus-touch-controls'];
+              if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+                gp.controller.hapticActuators[0].pulse(_on ? 0.4 : 0.2, 60);
+              }
             } catch(e) {}
           });
         }
@@ -129,15 +134,14 @@
   loading-screen="dotsColor: #ffee88; backgroundColor: #000">
 
   <a-assets timeout="120000">
-    <img id="night-sky-img" src="night_sky.jpg" crossorigin="anonymous">
     <a-asset-item id="scene-glb" src="a_night_in_the_blitz_10.glb"></a-asset-item>
   </a-assets>
 
   <!-- Scene -->
   <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1" night-darken></a-entity>
 
-  <!-- Sky -->
-  <a-sky src="#night-sky-img" color="#ffffff"></a-sky>
+  <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
+  <a-sky color="#010306"></a-sky>
 
   <!-- Lighting -->
   <a-light type="ambient" color="#0a0f1a" intensity="0.08"></a-light>
@@ -193,6 +197,6 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v11</div>
+<div id="version-overlay">v12</div>
 </body>
 </html>
