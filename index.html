@@ -233,11 +233,10 @@
               torch-toggle brightness-cycle>
       <!-- Torch model — held in right hand, points forward (-Z) -->
       <a-entity id="torch" position="0 -0.02 -0.05" rotation="-90 0 0">
-        <!-- Bounce fill and moonlight inside torch so they toggle off with it -->
-        <a-entity light="type:point; color:#ff7700; intensity:0.08; distance:3; decay:2" position="0 0 0"></a-entity>
+        <!-- Moonlight bounce inside torch so it toggles off with it -->
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — 90° X aligns barrel with forward axis -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 180 0" position="0 0 0"></a-entity>
+        <!-- Torch GLB model — night-darken makes it matte black like the real thing -->
+        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 180 0" position="0 0 0" night-darken></a-entity>
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
@@ -250,7 +249,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v18</div>
+<div id="version-overlay">v19</div>
 
 <!-- ── Debug panel — desktop only, hidden in VR ──────────────────────── -->
 <div id="debug-panel" style="
