@@ -280,7 +280,7 @@
     animation="property:position; from:3 92 -18; to:3 94 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -4; to:0 25 4; dur:38000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.2 1 1.1" radius="1"
-      material="shader:standard; color:#b0bcc8; metalness:0.65; roughness:0.22; side:double"></a-sphere>
+      material="shader:standard; color:#b0bcc8; metalness:0.65; roughness:0.22; emissive:#8899aa; emissiveIntensity:0.22; side:double"></a-sphere>
     <a-cylinder radius="0.018" height="92" color="#666" position="0 -46 0"
       material="color:#777; opacity:0.35; transparent:true"></a-cylinder>
   </a-entity>
@@ -289,7 +289,7 @@
     animation="property:position; from:-2 115 -28; to:-2 118 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 3; to:0 -30 -3; dur:44000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.4 1 1.15" radius="1"
-      material="shader:standard; color:#aab8c4; metalness:0.65; roughness:0.2; side:double"></a-sphere>
+      material="shader:standard; color:#aab8c4; metalness:0.65; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.2; side:double"></a-sphere>
     <a-cylinder radius="0.018" height="115" color="#666" position="0 -57.5 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
@@ -298,7 +298,7 @@
     animation="property:position; from:11 105 -22; to:11 108 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -6; to:0 20 5; dur:32000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
-      material="shader:standard; color:#b4c0cc; metalness:0.68; roughness:0.2; side:double"></a-sphere>
+      material="shader:standard; color:#b4c0cc; metalness:0.68; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.22; side:double"></a-sphere>
     <a-cylinder radius="0.018" height="105" color="#666" position="0 -52.5 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
@@ -307,21 +307,20 @@
     animation="property:position; from:18 130 -12; to:18 133 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 4; to:0 -18 -4; dur:50000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.1 1 1.05" radius="1"
-      material="shader:standard; color:#b8c4d0; metalness:0.62; roughness:0.24; side:double"></a-sphere>
+      material="shader:standard; color:#b8c4d0; metalness:0.62; roughness:0.24; emissive:#8899aa; emissiveIntensity:0.2; side:double"></a-sphere>
   </a-entity>
 
   <a-entity id="balloon-5" position="-6 100 -10"
     animation="property:position; from:-6 100 -10; to:-6 102 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
-      material="shader:standard; color:#acbac6; metalness:0.67; roughness:0.21; side:double"></a-sphere>
+      material="shader:standard; color:#acbac6; metalness:0.67; roughness:0.21; emissive:#8899aa; emissiveIntensity:0.22; side:double"></a-sphere>
     <a-cylinder radius="0.018" height="100" color="#666" position="0 -50 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <!-- ── TEST: Audio trigger — glowing sphere near spawn, point torch to beep ─ -->
-  <!-- Swap src="" for a real audio file path to test diary quote playback      -->
-  <a-entity position="1.5 1.2 -3" audio-trigger
+  <!-- ── TEST: Audio trigger — glowing sphere near spawn, point torch at it ── -->
+  <a-entity position="1.5 1.2 -3" audio-trigger="src: blitz_audio_test.mp4; once: true"
     geometry="primitive:sphere; radius:0.12"
     material="shader:standard; color:#ff4400; emissive:#ff2200; emissiveIntensity:0.5; roughness:0.5">
   </a-entity>
@@ -353,14 +352,15 @@
     <a-entity oculus-touch-controls="hand: right; model: false"
               torch-toggle brightness-cycle>
       <!-- Torch model — held in right hand, points forward (-Z) -->
-      <a-entity id="torch" position="0 -0.02 -0.05" rotation="-90 0 0">
+      <!-- down 5cm (-0.07), back 10cm (+0.05 in controller Z = toward player) -->
+      <a-entity id="torch" position="0 -0.07 0.05" rotation="-90 0 0">
         <!-- Moonlight bounce inside torch so it toggles off with it -->
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — night-darken makes it matte black like the real thing -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 0 0" position="0 0 0" night-darken></a-entity>
-        <!-- Bulb glow — emissive sphere at the lens (wide cap = front, +Y in wrapper) -->
-        <a-entity id="torch-glow" position="0 0.09 0">
-          <a-sphere radius="0.004" material="shader:standard; color:#ffcc66; emissive:#ffaa33; emissiveIntensity:3; roughness:0.3"></a-sphere>
+        <!-- Torch GLB model — narrow hooded lens end = front (+Y in wrapper = toward scene) -->
+        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 180 0" position="0 0 0" night-darken></a-entity>
+        <!-- Bulb glow — inside the recessed lens hood at the narrow front end -->
+        <a-entity id="torch-glow" position="0 0.055 0">
+          <a-sphere radius="0.003" material="shader:standard; color:#ffcc66; emissive:#ffaa33; emissiveIntensity:4; roughness:0.3"></a-sphere>
           <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
         </a-entity>
         <!-- Spotlight target — far forward so beam follows hand direction -->
@@ -369,14 +369,14 @@
         <a-entity id="torch-point" light="type:spot; color:#ffe8c0; intensity:540; distance:22; decay:2; angle:18; penumbra:0.45; target:#torch-beam-target"
                   torch-flicker="base:540; range:30; speed:3"
                   torch-raycaster
-                  position="0 0.14 0"></a-entity>
+                  position="0 0.08 0"></a-entity>
       </a-entity>
     </a-entity>
 
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v28</div>
+<div id="version-overlay">v29</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -417,6 +417,7 @@
     if (sun) sun.setAttribute('light', 'intensity', 0);
     var sky = document.querySelector('a-sky');
     if (sky) sky.setAttribute('color', '#010306');
+    scene.setAttribute('background', 'color: #010306');
     document.getElementById('btn-night').style.borderColor = '#ffffff';
     document.getElementById('btn-day').style.borderColor = '#ffcc66';
   }
@@ -431,7 +432,8 @@
     var sun = document.getElementById('sun-light');
     if (sun) sun.setAttribute('light', 'color:#fff8e8; intensity:2.0');
     var sky = document.querySelector('a-sky');
-    if (sky) sky.setAttribute('color', '#6aaddb');
+    if (sky) sky.setAttribute('color', '#ffffff');
+    scene.setAttribute('background', 'color: #ffffff');
     document.getElementById('btn-day').style.borderColor = '#ffffff';
     document.getElementById('btn-night').style.borderColor = '#aaccff';
   }
