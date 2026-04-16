@@ -48,7 +48,11 @@
                   // computeVertexNormals() is essential: unlit meshes often have no normals,
                   // and MeshStandardMaterial needs them for all lighting calculations.
                   if (node.geometry) node.geometry.computeVertexNormals();
-                  var col = mat.color.clone().multiplyScalar(0.35);
+                  // When a texture map exists, use a neutral grey — the texture carries the real
+                  // colour and mat.color may be black (Blender export), which would block it.
+                  var col = mat.map
+                    ? new THREE.Color(0.35, 0.35, 0.35)
+                    : mat.color.clone().multiplyScalar(0.35);
                   var replacement = new THREE.MeshStandardMaterial({
                     map: mat.map,
                     color: col,
@@ -249,7 +253,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v23</div>
+<div id="version-overlay">v24</div>
 
 <!-- ── Debug panel — desktop only, hidden in VR ──────────────────────── -->
 <div id="debug-panel" style="
