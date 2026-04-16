@@ -160,7 +160,7 @@
 
     <a-entity id="cam" camera look-controls position="0 1.6 0">
       <!-- Bounce fill: warm light already reflected off nearby walls/floor -->
-      <a-entity light="type:point; color:#ffeeaa; intensity:0.12; distance:6; decay:1" position="0 -0.4 0"></a-entity>
+      <a-entity light="type:point; color:#ffeeaa; intensity:0.5; distance:6; decay:1" position="0 -0.4 0"></a-entity>
       <!-- Moonlight: faint cool rim on upward-facing surfaces -->
       <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
     </a-entity>
@@ -170,7 +170,7 @@
     <a-entity oculus-touch-controls="hand: right; model: false"
               torch-toggle>
       <!-- Blackout electric torch — points forward (-Z), held like a flashlight -->
-      <a-entity id="torch" position="0 -0.02 -0.05" rotation="90 0 0">
+      <a-entity id="torch" position="0 -0.02 -0.05" rotation="-90 0 0">
         <!-- Main body — dark gunmetal tube -->
         <a-cylinder radius="0.022" height="0.15"
                     material="color:#1c1c1c; roughness:0.35; metalness:0.85"
@@ -198,8 +198,8 @@
                     material="color:#ffffcc; emissive:#ffee88; emissiveIntensity:0.6; shader:flat; transparent:true; opacity:0.92"
                     position="0 0.126 0"></a-cylinder>
         <!-- Light — pale yellow, points forward from lens -->
-        <a-entity light="type:point; color:#ffeeaa; intensity:0.9; distance:9; decay:1"
-                  torch-flicker="base:0.9; range:0.12; speed:4"
+        <a-entity light="type:point; color:#ffeeaa; intensity:4; distance:10; decay:1"
+                  torch-flicker="base:4; range:0.5; speed:4"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
@@ -207,6 +207,6 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v13</div>
+<div id="version-overlay">v14</div>
 </body>
 </html>
