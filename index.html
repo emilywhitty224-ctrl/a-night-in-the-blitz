@@ -121,10 +121,10 @@
     AFRAME.registerComponent('brightness-cycle', {
       init: function () {
         var presets = [
-          { label:'very dark',  ambient:0.06,  torch:600  },
-          { label:'dark',       ambient:0.12,  torch:1200 },
-          { label:'medium',     ambient:0.25,  torch:2000 },
-          { label:'bright',     ambient:0.5,   torch:3500 }
+          { label:'very dark',  ambient:0.06,  torch:300  },
+          { label:'dark',       ambient:0.12,  torch:600  },
+          { label:'medium',     ambient:0.25,  torch:1000 },
+          { label:'bright',     ambient:0.5,   torch:1750 }
         ];
         var idx = 1; // start on 'dark'
         function bind() {
@@ -240,8 +240,8 @@
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#fff4e0; intensity:1200; distance:22; decay:2; angle:28; penumbra:0.55; target:#torch-beam-target"
-                  torch-flicker="base:1200; range:60; speed:3"
+        <a-entity id="torch-point" light="type:spot; color:#ffe8c0; intensity:600; distance:22; decay:2; angle:14; penumbra:0.45; target:#torch-beam-target"
+                  torch-flicker="base:600; range:30; speed:3"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
@@ -249,7 +249,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v21</div>
+<div id="version-overlay">v22</div>
 
 <!-- ── Debug panel — desktop only, hidden in VR ──────────────────────── -->
 <div id="debug-panel" style="
@@ -265,8 +265,8 @@
   </div>
   <div style="margin-top:4px">
     Torch intensity:
-    <input id="dbg-torch" type="range" min="0" max="5000" step="10" value="1200" style="width:120px">
-    <span id="dbg-torch-val">1200</span>
+    <input id="dbg-torch" type="range" min="0" max="5000" step="10" value="600" style="width:120px">
+    <span id="dbg-torch-val">600</span>
   </div>
   <div style="margin-top:4px">
     Torch range (m):
