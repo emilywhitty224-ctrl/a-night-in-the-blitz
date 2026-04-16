@@ -36,17 +36,32 @@
               if (!node.isMesh) return;
               var mats = Array.isArray(node.material) ? node.material : [node.material];
               mats.forEach(function (mat) {
-                // Kill emissives — no self-lit surfaces
+                // Kill emissives
                 if (mat.emissive) mat.emissive.setRGB(0, 0, 0);
                 mat.emissiveIntensity = 0;
-                // Kill baked lightmaps — these are why pub/Princess Street glow in the dark
+                // Kill baked lightmaps and env maps
                 if (mat.lightMap) mat.lightMap = null;
                 mat.lightMapIntensity = 0;
-                // Kill env map reflections
                 if (mat.envMap) mat.envMap = null;
-                // Darken diffuse colour
-                if (mat.color) mat.color.multiplyScalar(0.3);
-                mat.needsUpdate = true;
+                // MeshBasicMaterial ignores scene lighting entirely — convert to Standard
+                // so the material responds to the torch and moonlight
+                if (mat.type === 'MeshBasicMaterial') {
+                  var replacement = new THREE.MeshStandardMaterial({
+                    map: mat.map,
+                    color: mat.color.clone(),
+                    roughness: 1.0,
+                    metalness: 0.0,
+                    transparent: mat.transparent,
+                    opacity: mat.opacity,
+                    alphaTest: mat.alphaTest,
+                    side: mat.side
+                  });
+                  replacement.color.multiplyScalar(0.15);
+                  node.material = replacement;
+                } else {
+                  if (mat.color) mat.color.multiplyScalar(0.15);
+                  mat.needsUpdate = true;
+                }
               });
             });
           } catch(e) { console.warn('night-darken error:', e); }
@@ -181,12 +196,12 @@
         <a-entity light="type:point; color:#ff7700; intensity:0.5; distance:6; decay:1" position="0 0 0"></a-entity>
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
         <!-- Torch GLB model -->
-        <a-entity gltf-model="#torch-glb" scale="0.15 0.15 0.15" position="0 0 0"></a-entity>
+        <a-entity gltf-model="#torch-glb" scale="0.05 0.05 0.05" rotation="0 180 0" position="0 0 0"></a-entity>
         <!-- Spotlight target — far along torch forward axis so beam follows hand -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Main spotlight beam — narrow cone gives a circle on surfaces -->
-        <a-entity light="type:spot; color:#ff7700; intensity:4; distance:12; decay:1; angle:10; penumbra:0.3; target:#torch-beam-target"
-                  torch-flicker="base:4; range:0.5; speed:4"
+        <a-entity light="type:spot; color:#ff7700; intensity:16; distance:12; decay:1; angle:10; penumbra:0.3; target:#torch-beam-target"
+                  torch-flicker="base:16; range:0.5; speed:4"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
