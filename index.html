@@ -141,9 +141,13 @@
 
   <!-- Lighting -->
   <a-light type="ambient" color="#0a0f1a" intensity="0.08"></a-light>
-  <!-- Blackout lamp lights — dim, short range, barely reaches the ground -->
-  <a-light type="point" color="#ffaa33" intensity="6" distance="3" decay="2" position="3.32 3.07 -19.04"></a-light>
-  <a-light type="point" color="#ffaa33" intensity="6" distance="3" decay="2" position="15.36 2.74 -17.77"></a-light>
+  <!-- Blackout lamp lights — spotlights pointing straight down, light only reaches ground -->
+  <a-light type="spot" color="#ffaa33" intensity="6" distance="4" decay="2" angle="35" penumbra="0.4"
+           position="3.32 3.07 -19.04" target="#lamp-target-1"></a-light>
+  <a-entity id="lamp-target-1" position="3.32 0 -19.04"></a-entity>
+  <a-light type="spot" color="#ffaa33" intensity="6" distance="4" decay="2" angle="35" penumbra="0.4"
+           position="15.36 2.74 -17.77" target="#lamp-target-2"></a-light>
+  <a-entity id="lamp-target-2" position="15.36 0 -17.77"></a-entity>
 
   <!-- Player -->
   <a-entity id="rig" position="0 0 0"
