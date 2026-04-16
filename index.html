@@ -35,30 +35,38 @@
             e.detail.model.traverse(function (node) {
               if (!node.isMesh) return;
               var mats = Array.isArray(node.material) ? node.material : [node.material];
-              mats.forEach(function (mat) {
-                // Kill emissives
+              mats.forEach(function (mat, i) {
+                // Kill emissives and baked maps
                 if (mat.emissive) mat.emissive.setRGB(0, 0, 0);
                 mat.emissiveIntensity = 0;
-                // Kill baked lightmaps and env maps
                 if (mat.lightMap) mat.lightMap = null;
                 mat.lightMapIntensity = 0;
                 if (mat.envMap) mat.envMap = null;
-                // Darken diffuse — applies to all material types
-                if (mat.color) mat.color.multiplyScalar(0.15);
-                // MeshBasicMaterial ignores scene lights — convert to Standard
-                // so torch and moonlight can illuminate it
+
                 if (mat.type === 'MeshBasicMaterial') {
-                  node.material = new THREE.MeshStandardMaterial({
+                  // Unlit photogrammetry mesh — convert to Standard so it responds to lights.
+                  // computeVertexNormals() is essential: unlit meshes often have no normals,
+                  // and MeshStandardMaterial needs them for all lighting calculations.
+                  if (node.geometry) node.geometry.computeVertexNormals();
+                  var col = mat.color.clone().multiplyScalar(0.15);
+                  var replacement = new THREE.MeshStandardMaterial({
                     map: mat.map,
-                    color: mat.color.clone(),
-                    roughness: 1.0,
+                    color: col,
+                    roughness: 0.9,
                     metalness: 0.0,
                     side: THREE.DoubleSide,
                     transparent: mat.transparent,
                     opacity: mat.opacity,
                     alphaTest: mat.alphaTest
                   });
+                  replacement.needsUpdate = true;
+                  if (Array.isArray(node.material)) {
+                    node.material[i] = replacement;
+                  } else {
+                    node.material = replacement;
+                  }
                 } else {
+                  if (mat.color) mat.color.multiplyScalar(0.15);
                   mat.needsUpdate = true;
                 }
               });
@@ -113,10 +121,10 @@
     AFRAME.registerComponent('brightness-cycle', {
       init: function () {
         var presets = [
-          { label:'very dark',  ambient:0.06,  torch:120 },
-          { label:'dark',       ambient:0.12,  torch:220 },
-          { label:'medium',     ambient:0.25,  torch:360 },
-          { label:'bright',     ambient:0.5,   torch:500 }
+          { label:'very dark',  ambient:0.06,  torch:600  },
+          { label:'dark',       ambient:0.12,  torch:1200 },
+          { label:'medium',     ambient:0.25,  torch:2000 },
+          { label:'bright',     ambient:0.5,   torch:3500 }
         ];
         var idx = 1; // start on 'dark'
         function bind() {
@@ -205,10 +213,10 @@
   <a-light type="directional" color="#c8d8ff" intensity="0.04"
            position="4 10 6"></a-light>
   <!-- Blackout lamp lights — spotlights pointing straight down, light only reaches ground -->
-  <a-light type="spot" color="#ffaa33" intensity="6" distance="4" decay="2" angle="35" penumbra="0.4"
+  <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
            position="3.32 3.07 -19.04" target="#lamp-target-1"></a-light>
   <a-entity id="lamp-target-1" position="3.32 0 -19.04"></a-entity>
-  <a-light type="spot" color="#ffaa33" intensity="6" distance="4" decay="2" angle="35" penumbra="0.4"
+  <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
            position="15.36 2.74 -17.77" target="#lamp-target-2"></a-light>
   <a-entity id="lamp-target-2" position="15.36 0 -17.77"></a-entity>
 
@@ -229,12 +237,12 @@
         <a-entity light="type:point; color:#ff7700; intensity:0.08; distance:3; decay:2" position="0 0 0"></a-entity>
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
         <!-- Torch GLB model — 90° X aligns barrel with forward axis -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 0 0" position="0 0 0"></a-entity>
+        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 180 0" position="0 0 0"></a-entity>
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#ff8833; intensity:220; distance:18; decay:2; angle:28; penumbra:0.55; target:#torch-beam-target"
-                  torch-flicker="base:220; range:8; speed:3"
+        <a-entity id="torch-point" light="type:spot; color:#ffc87a; intensity:1200; distance:22; decay:2; angle:28; penumbra:0.55; target:#torch-beam-target"
+                  torch-flicker="base:1200; range:60; speed:3"
                   position="0 0.14 0"></a-entity>
       </a-entity>
     </a-entity>
@@ -258,8 +266,8 @@
   </div>
   <div style="margin-top:4px">
     Torch intensity:
-    <input id="dbg-torch" type="range" min="0" max="600" step="1" value="220" style="width:120px">
-    <span id="dbg-torch-val">220</span>
+    <input id="dbg-torch" type="range" min="0" max="5000" step="10" value="1200" style="width:120px">
+    <span id="dbg-torch-val">1200</span>
   </div>
   <div style="margin-top:4px">
     Torch range (m):
