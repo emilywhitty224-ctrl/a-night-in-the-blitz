@@ -49,7 +49,10 @@
       init: function () {
         this.el.addEventListener('model-loaded', function (e) {
           try {
-            e.detail.model.traverse(function (node) {
+            var model = e.detail.model;
+            model.updateMatrixWorld(true);
+            var topCorner = new THREE.Vector3();
+            model.traverse(function (node) {
               if (!node.isMesh) return;
               var mats = Array.isArray(node.material) ? node.material : [node.material];
               mats.forEach(function (mat, i) {
@@ -76,6 +79,27 @@
                   mat.needsUpdate = true;
                 }
               });
+
+              // Wet-cobble look — meshes whose world-Y top is below ~0.5m
+              // get lowered roughness + a touch of metalness so puddled ground
+              // picks up torch + streetlamp reflections.
+              if (node.geometry) {
+                if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+                var bb = node.geometry.boundingBox;
+                if (bb) {
+                  topCorner.set(0, bb.max.y, 0).applyMatrix4(node.matrixWorld);
+                  if (topCorner.y < 0.5) {
+                    var cur = Array.isArray(node.material) ? node.material : [node.material];
+                    cur.forEach(function (m) {
+                      if (m && 'roughness' in m) {
+                        m.roughness = 0.55;
+                        m.metalness = 0.1;
+                        m.needsUpdate = true;
+                      }
+                    });
+                  }
+                }
+              }
             });
           } catch(err) { console.warn('night-darken error:', err); }
         });
@@ -431,6 +455,91 @@
       }
     });
 
+    // ── Rain — GPU-instanced vertical streaks falling through a cylinder
+    //    around the rig. Parented to #rig so the cylinder follows the player.
+    //    Only the translation columns of each instance matrix are rewritten
+    //    each tick, keeping the loop cheap (~1500 * 3 float writes). ────────
+    AFRAME.registerComponent('rain', {
+      schema: {
+        count:  { default: 1500 },
+        radius: { default: 12 },
+        height: { default: 15 },
+        speed:  { default: 8 },
+        wind:   { default: 1.2 }
+      },
+      init: function () {
+        var d = this.data;
+        var geom = new THREE.PlaneGeometry(0.008, 0.22);
+        geom.translate(0, -0.11, 0); // pivot at top so streaks fall from above
+        var mat = new THREE.MeshBasicMaterial({
+          color: 0xaabbdd,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: true
+        });
+        var mesh = new THREE.InstancedMesh(geom, mat, d.count);
+        mesh.frustumCulled = false;
+        var dummy = new THREE.Object3D();
+        this._positions = new Float32Array(d.count * 3);
+        for (var i = 0; i < d.count; i++) {
+          var a = Math.random() * Math.PI * 2;
+          var r = Math.sqrt(Math.random()) * d.radius;
+          var x = Math.cos(a) * r;
+          var z = Math.sin(a) * r;
+          var y = Math.random() * d.height;
+          this._positions[i*3]   = x;
+          this._positions[i*3+1] = y;
+          this._positions[i*3+2] = z;
+          dummy.position.set(x, y, z);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+        this.el.setObject3D('mesh', mesh);
+        this._mesh = mesh;
+      },
+      tick: function (t, dt) {
+        if (!this._mesh) return;
+        var d = this.data;
+        var dtS = Math.min(0.05, dt / 1000);
+        var drop  = d.speed * dtS;
+        var drift = d.wind * dtS;
+        var arr = this._mesh.instanceMatrix.array;
+        var pos = this._positions;
+        var n = d.count;
+        var rad = d.radius;
+        var rad2 = rad * 2;
+        for (var i = 0; i < n; i++) {
+          var i3 = i * 3;
+          pos[i3+1] -= drop;
+          pos[i3]   += drift;
+          if (pos[i3+1] < 0) {
+            pos[i3+1] = d.height;
+            var a = Math.random() * Math.PI * 2;
+            var r = Math.sqrt(Math.random()) * rad;
+            pos[i3]   = Math.cos(a) * r;
+            pos[i3+2] = Math.sin(a) * r;
+          }
+          // wrap drift so streaks stay within the cylinder
+          if (pos[i3] > rad)  pos[i3] -= rad2;
+          if (pos[i3] < -rad) pos[i3] += rad2;
+          var off = i * 16;
+          arr[off + 12] = pos[i3];
+          arr[off + 13] = pos[i3+1];
+          arr[off + 14] = pos[i3+2];
+        }
+        this._mesh.instanceMatrix.needsUpdate = true;
+      },
+      remove: function () {
+        if (this._mesh) {
+          this._mesh.geometry.dispose();
+          this._mesh.material.dispose();
+        }
+      }
+    });
+
     // ── Torch pickup — on load, in-hand torch is hidden and #scene-torch lies
     //    on the ground. On grip-down within 0.35m of #scene-torch, swap:
     //    hide the floor torch, show the in-hand one, fire haptic, fade hint. ──
@@ -459,11 +568,27 @@
         var torchPos = new THREE.Vector3();
         this.el.object3D.getWorldPosition(handPos);
         this._sceneTorch.object3D.getWorldPosition(torchPos);
-        if (handPos.distanceTo(torchPos) >= 0.35) return;
+        if (handPos.distanceTo(torchPos) >= 0.25) return;
         this._pickedUp = true;
         this._sceneTorch.setAttribute('visible', false);
         this._torch.setAttribute('visible', true);
-        if (this._hint) this._hint.setAttribute('visible', false);
+        if (this._hint) {
+          var hint = this._hint;
+          var textObj = hint.getObject3D('text');
+          if (textObj && textObj.material) {
+            textObj.material.transparent = true;
+            var start = performance.now();
+            var fade = function () {
+              var k = Math.min(1, (performance.now() - start) / 500);
+              textObj.material.opacity = 1 - k;
+              if (k < 1) requestAnimationFrame(fade);
+              else hint.setAttribute('visible', false);
+            };
+            fade();
+          } else {
+            setTimeout(function () { hint.setAttribute('visible', false); }, 500);
+          }
+        }
         var gp = this.el.components['oculus-touch-controls'];
         if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
           gp.controller.hapticActuators[0].pulse(0.7, 120);
@@ -530,7 +655,7 @@
 
   <!-- Pickup hint — floats above the floor torch, hidden on pickup -->
   <a-entity id="pickup-hint" position="0.3 0.35 -0.5" rotation="-35 0 0"
-    text="value: Grip to pick up; align:center; color:#ffddaa; width:0.6; side:double"></a-entity>
+    text="value: Pick up the torch (grip); align:center; color:#ffddaa; width:0.7; side:double"></a-entity>
 
   <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
   <a-sky color="#010306"></a-sky>
@@ -649,6 +774,9 @@
             movement-controls="fly: false; speed: 0.2; camera: #cam"
             smooth-turn="speed: 60">
 
+    <!-- Rain — instanced streaks falling in a cylinder around the player -->
+    <a-entity rain></a-entity>
+
     <a-entity id="cam" camera look-controls position="0 1.6 0">
       <!-- Breath condensation — faint puff, only visible against the dark -->
       <a-entity breath-puff position="0 -0.06 -0.28"
@@ -685,7 +813,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v52</div>
+<div id="version-overlay">v53</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
