@@ -17,6 +17,23 @@
   </style>
 
   <script>
+    // Configure Draco decoder before any models load
+    document.addEventListener('DOMContentLoaded', function () {
+      try {
+        var dracoLoader = new THREE.DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+        AFRAME.systems['gltf-model'] && AFRAME.systems['gltf-model'].loader &&
+          AFRAME.systems['gltf-model'].loader.setDRACOLoader(dracoLoader);
+        // Also hook into scene load in case the system isn't ready yet
+        document.querySelector('a-scene').addEventListener('loaded', function () {
+          try {
+            var sys = document.querySelector('a-scene').systems['gltf-model'];
+            if (sys && sys.loader) sys.loader.setDRACOLoader(dracoLoader);
+          } catch(e) {}
+        });
+      } catch(e) { console.warn('[draco-setup]', e); }
+    });
+
     // Suppress errors that would kill the Quest WebXR session
     window.addEventListener('unhandledrejection', function (e) {
       e.preventDefault();
@@ -423,7 +440,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v32</div>
+<div id="version-overlay">v33</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
