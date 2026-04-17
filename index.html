@@ -481,6 +481,12 @@
         });
         var mesh = new THREE.InstancedMesh(geom, mat, d.count);
         mesh.frustumCulled = false;
+        // Per-frame translation writes require DynamicDrawUsage; without it
+        // three.js may still work but can warn or behave inconsistently on
+        // some WebGL drivers (including Quest Browser).
+        if (THREE.DynamicDrawUsage != null) {
+          mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        }
         var dummy = new THREE.Object3D();
         this._positions = new Float32Array(d.count * 3);
         for (var i = 0; i < d.count; i++) {
@@ -774,8 +780,10 @@
             movement-controls="fly: false; speed: 0.2; camera: #cam"
             smooth-turn="speed: 60">
 
-    <!-- Rain — instanced streaks falling in a cylinder around the player -->
-    <a-entity rain></a-entity>
+    <!-- Rain — instanced streaks falling in a cylinder around the player
+         DISABLED v55 while isolating a crash-on-open. Re-enable by
+         uncommenting the element below once the root cause is confirmed. -->
+    <!-- <a-entity rain></a-entity> -->
 
     <a-entity id="cam" camera look-controls position="0 1.6 0">
       <!-- Breath condensation — faint puff, only visible against the dark -->
@@ -813,7 +821,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v54</div>
+<div id="version-overlay">v55</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
