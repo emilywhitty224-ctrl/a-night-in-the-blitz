@@ -281,8 +281,9 @@
       }
     });
 
-    // ── Flat material — MeshBasicMaterial, no lighting response (for torch) ─
-    AFRAME.registerComponent('flat-material', {
+    // ── Matte darken — MeshStandardMaterial roughness:1 metalness:0 (no shine,
+    //    but still responds to the torch's own spotlight so it's visible) ──────
+    AFRAME.registerComponent('matte-darken', {
       init: function () {
         this.el.addEventListener('model-loaded', function (e) {
           try {
@@ -290,19 +291,21 @@
               if (!node.isMesh) return;
               var mats = Array.isArray(node.material) ? node.material : [node.material];
               mats.forEach(function (mat, i) {
-                var flat = new THREE.MeshBasicMaterial({
+                var m = new THREE.MeshStandardMaterial({
                   map: mat.map || null,
-                  color: mat.map ? new THREE.Color(1, 1, 1) : (mat.color ? mat.color.clone() : new THREE.Color(0.4, 0.35, 0.3)),
+                  color: mat.map ? new THREE.Color(0.55, 0.5, 0.45) : (mat.color ? mat.color.clone().multiplyScalar(0.55) : new THREE.Color(0.25, 0.2, 0.18)),
+                  roughness: 1.0,
+                  metalness: 0.0,
                   side: THREE.DoubleSide,
                   transparent: mat.transparent || false,
                   opacity: mat.opacity !== undefined ? mat.opacity : 1.0,
                   alphaTest: mat.alphaTest || 0
                 });
-                if (Array.isArray(node.material)) node.material[i] = flat;
-                else node.material = flat;
+                if (Array.isArray(node.material)) node.material[i] = m;
+                else node.material = m;
               });
             });
-          } catch(err) { console.warn('[flat-material]', err); }
+          } catch(err) { console.warn('[matte-darken]', err); }
         });
       }
     });
@@ -334,9 +337,7 @@
         ];
         var idx = 0;
         function apply() {
-          var torch = document.getElementById('torch');
-          if (!torch) return;
-          var glb = torch.querySelector('[flat-material]');
+          var glb = document.getElementById('torch-glb-entity');
           if (!glb) return;
           glb.setAttribute('rotation', rotations[idx]);
           console.log('[torch-cycle] ' + idx + ': ' + rotations[idx]);
@@ -394,7 +395,7 @@
     position="0.3 0.04 -0.5"
     rotation="0 45 90"
     scale="0.075 0.075 0.075"
-    flat-material></a-entity>
+    matte-darken></a-entity>
 
   <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
   <a-sky color="#010306"></a-sky>
@@ -457,11 +458,9 @@
     animation="property:rotation; from:0 -50 0; to:0 50 0; dur:9000; dir:alternate; loop:true; easing:easeInOutSine">
     <a-entity
       animation="property:rotation; from:-8 0 0; to:6 0 0; dur:3700; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-light type="spot" color="#cce8ff" intensity="350" distance="300" decay="1.2" angle="3" penumbra="0.12"
-               rotation="-90 0 0"></a-light>
-      <!-- Visible beam cone — translucent, no fog, points upward -->
+      <!-- Cone only — no spot light, keeps total spot count at 3 (Quest limit) -->
       <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.2; segmentsRadial:8"
-        material="color:#99ccff; opacity:0.07; transparent:true; side:double; shader:flat"
+        material="color:#99ccff; opacity:0.08; transparent:true; side:double; shader:flat"
         no-fog position="0 110 0"></a-entity>
     </a-entity>
   </a-entity>
@@ -470,10 +469,8 @@
     animation="property:rotation; from:0 -55 0; to:0 20 0; dur:13000; dir:alternate; loop:true; easing:easeInOutSine">
     <a-entity
       animation="property:rotation; from:-5 0 0; to:8 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-light type="spot" color="#d8eeff" intensity="300" distance="300" decay="1.2" angle="2.5" penumbra="0.1"
-               rotation="-90 0 0"></a-light>
       <a-entity geometry="primitive:cone; height:220; radiusBottom:4.5; radiusTop:0.2; segmentsRadial:8"
-        material="color:#aaddff; opacity:0.065; transparent:true; side:double; shader:flat"
+        material="color:#aaddff; opacity:0.075; transparent:true; side:double; shader:flat"
         no-fog position="0 110 0"></a-entity>
     </a-entity>
   </a-entity>
@@ -515,8 +512,8 @@
       <a-entity id="torch" position="0 -0.07 0.05" rotation="-90 0 0">
         <!-- Moonlight bounce inside torch so it toggles off with it -->
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — flat-material = no reflections/lighting response -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="0 0 0" position="0 0 0" flat-material></a-entity>
+        <!-- Torch GLB model — matte, responds to torch light, no reflections -->
+        <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 0 0" position="0 0 0" matte-darken></a-entity>
         <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
         <a-entity id="torch-glow" position="0 0.055 0">
           <a-sphere radius="0.003" material="shader:standard; color:#ffcc66; emissive:#ffaa33; emissiveIntensity:4; roughness:0.3"></a-sphere>
@@ -535,7 +532,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v43</div>
+<div id="version-overlay">v44</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
