@@ -484,46 +484,46 @@
 
   <!-- ── Barrage Balloons — silver blimps ~90–130m overhead, slow drift ── -->
   <!-- Moonlight (directional from position 4 10 6) glistens off metalness  -->
-  <a-entity id="balloon-1" position="3 92 -18" no-fog
-    animation="property:position; from:3 92 -18; to:3 94 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-1" position="3 28 -18" no-fog
+    animation="property:position; from:3 28 -18; to:3 30 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -4; to:0 25 4; dur:38000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.2 1 1.1" radius="1"
       material="shader:standard; color:#b0bcc8; metalness:0.65; roughness:0.22; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="92" color="#666" position="0 -46 0"
+    <a-cylinder radius="0.018" height="28" color="#666" position="0 -14 0"
       material="color:#777; opacity:0.35; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-2" position="-2 115 -28" no-fog
-    animation="property:position; from:-2 115 -28; to:-2 118 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-2" position="-2 40 -28" no-fog
+    animation="property:position; from:-2 40 -28; to:-2 43 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 3; to:0 -30 -3; dur:44000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.4 1 1.15" radius="1"
       material="shader:standard; color:#aab8c4; metalness:0.65; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="115" color="#666" position="0 -57.5 0"
+    <a-cylinder radius="0.018" height="40" color="#666" position="0 -20 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-3" position="11 105 -22" no-fog
-    animation="property:position; from:11 105 -22; to:11 108 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-3" position="11 35 -22" no-fog
+    animation="property:position; from:11 35 -22; to:11 38 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -6; to:0 20 5; dur:32000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
       material="shader:standard; color:#b4c0cc; metalness:0.68; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="105" color="#666" position="0 -52.5 0"
+    <a-cylinder radius="0.018" height="35" color="#666" position="0 -17.5 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-4" position="18 130 -12" no-fog
-    animation="property:position; from:18 130 -12; to:18 133 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-4" position="18 50 -12" no-fog
+    animation="property:position; from:18 50 -12; to:18 53 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 4; to:0 -18 -4; dur:50000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.1 1 1.05" radius="1"
       material="shader:standard; color:#b8c4d0; metalness:0.62; roughness:0.24; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
   </a-entity>
 
-  <a-entity id="balloon-5" position="-6 100 -10" no-fog
-    animation="property:position; from:-6 100 -10; to:-6 102 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-5" position="-6 32 -10" no-fog
+    animation="property:position; from:-6 32 -10; to:-6 34 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
       material="shader:standard; color:#acbac6; metalness:0.67; roughness:0.21; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="100" color="#666" position="0 -50 0"
+    <a-cylinder radius="0.018" height="32" color="#666" position="0 -16 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
@@ -535,16 +535,27 @@
     material="opacity:0; transparent:true; side:double">
   </a-entity>
 
-  <!-- Searchlights — sweeping cone beams from rooftop level -->
-  <!-- Outer rig sweeps left-right, inner tilts up-down for erratic motion -->
+  <!-- Searchlights — sweeping cone beams from rooftop level.
+       Two-layer cone (hot inner core + softer outer halo) + emissive "arc lamp"
+       at the base, on a pulsing opacity animation for carbon-arc shimmer.
+       Flat shader only — no actual spot lights (Quest 3-spot budget stays free). -->
   <a-entity position="-10 12 -35"
     animation="property:rotation; from:0 -50 0; to:0 50 0; dur:9000; dir:alternate; loop:true; easing:easeInOutSine">
     <a-entity
       animation="property:rotation; from:-8 0 0; to:6 0 0; dur:3700; dir:alternate; loop:true; easing:easeInOutSine">
-      <!-- Cone only — no spot light, keeps total spot count at 3 (Quest limit) -->
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.2; segmentsRadial:8"
-        material="color:#99ccff; opacity:0.08; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"></a-entity>
+      <!-- Arc-lamp housing — bright point the beam emanates from -->
+      <a-sphere radius="0.55" position="0 0.3 0" no-fog
+        material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+      <!-- Inner hot core — narrow, brighter, whiter -->
+      <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.12; segmentsRadial:8"
+        material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat"
+        no-fog position="0 110 0"
+        animation="property:material.opacity; from:0.13; to:0.20; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      <!-- Outer halo — wider, coloured, softer -->
+      <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:8"
+        material="color:#a8d0ff; opacity:0.10; transparent:true; side:double; shader:flat"
+        no-fog position="0 110 0"
+        animation="property:material.opacity; from:0.08; to:0.13; dur:2600; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
     </a-entity>
   </a-entity>
 
@@ -552,9 +563,16 @@
     animation="property:rotation; from:0 -55 0; to:0 20 0; dur:13000; dir:alternate; loop:true; easing:easeInOutSine">
     <a-entity
       animation="property:rotation; from:-5 0 0; to:8 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:4.5; radiusTop:0.2; segmentsRadial:8"
-        material="color:#aaddff; opacity:0.075; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"></a-entity>
+      <a-sphere radius="0.5" position="0 0.3 0" no-fog
+        material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+      <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.12; segmentsRadial:8"
+        material="color:#ffffff; opacity:0.15; transparent:true; side:double; shader:flat"
+        no-fog position="0 110 0"
+        animation="property:material.opacity; from:0.12; to:0.19; dur:1900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:8"
+        material="color:#bbe0ff; opacity:0.09; transparent:true; side:double; shader:flat"
+        no-fog position="0 110 0"
+        animation="property:material.opacity; from:0.07; to:0.12; dur:3100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
     </a-entity>
   </a-entity>
 
@@ -614,7 +632,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v50</div>
+<div id="version-overlay">v51</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
