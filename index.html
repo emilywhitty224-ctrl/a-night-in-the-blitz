@@ -282,9 +282,9 @@
               mats.forEach(function (mat, i) {
                 var m = new THREE.MeshStandardMaterial({
                   map: mat.map || null,
-                  color: mat.map ? new THREE.Color(0.55, 0.5, 0.45) : (mat.color ? mat.color.clone().multiplyScalar(0.55) : new THREE.Color(0.25, 0.2, 0.18)),
-                  roughness: 1.0,
-                  metalness: 0.0,
+                  color: new THREE.Color(0.04, 0.04, 0.04),
+                  roughness: 0.9,
+                  metalness: 0.1,
                   side: THREE.DoubleSide,
                   transparent: mat.transparent || false,
                   opacity: mat.opacity !== undefined ? mat.opacity : 1.0,
@@ -313,39 +313,6 @@
           var mats = Array.isArray(node.material) ? node.material : [node.material];
           mats.forEach(function (m) { if (m) { m.fog = false; m.needsUpdate = true; } });
         });
-      }
-    });
-
-    // ── Torch rotation cycle — Y button on left controller cycles orientations ─
-    AFRAME.registerComponent('torch-rotation-cycle', {
-      init: function () {
-        var rotations = [
-          '90 0 0', '-90 0 0', '0 0 0', '0 180 0',
-          '180 0 0', '90 180 0', '-90 180 0', '0 90 0',
-          '0 -90 0', '90 90 0', '-90 90 0', '90 -90 0'
-        ];
-        var idx = 0;
-        function apply() {
-          var glb = document.getElementById('torch-glb-entity');
-          if (!glb) return;
-          glb.setAttribute('rotation', rotations[idx]);
-          console.log('[torch-cycle] ' + idx + ': ' + rotations[idx]);
-          var lbl = document.getElementById('torch-rot-label');
-          if (lbl) lbl.setAttribute('value', 'Torch ' + idx + ': ' + rotations[idx]);
-        }
-        function bind() {
-          var left = document.querySelector('[oculus-touch-controls*="left"]');
-          if (!left) { setTimeout(bind, 500); return; }
-          left.addEventListener('ybuttondown', function () {
-            idx = (idx + 1) % rotations.length;
-            apply();
-            var gp = left.components['oculus-touch-controls'];
-            if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
-              gp.controller.hapticActuators[0].pulse(0.3, 30);
-            }
-          });
-        }
-        bind();
       }
     });
 
@@ -514,15 +481,9 @@
   <!-- Player -->
   <a-entity id="rig" position="0 0 0"
             movement-controls="fly: false; speed: 0.2; camera: #cam"
-            smooth-turn="speed: 60"
-            torch-rotation-cycle>
+            smooth-turn="speed: 60">
 
-    <a-entity id="cam" camera look-controls position="0 1.6 0">
-      <!-- Floating label shows torch rotation index — left Y button cycles it -->
-      <a-entity id="torch-rot-label"
-        text="value: Left Y = cycle torch rotation; color:#ffff00; align:center; width:1.4"
-        position="0 -0.35 -1.5"></a-entity>
-    </a-entity>
+    <a-entity id="cam" camera look-controls position="0 1.6 0"></a-entity>
 
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
@@ -537,14 +498,14 @@
         <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 0 0" position="0 0 0" matte-darken></a-entity>
         <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
         <a-entity id="torch-glow" position="0 0.055 0">
-          <a-sphere radius="0.003" material="shader:standard; color:#ffcc66; emissive:#ffaa33; emissiveIntensity:4; roughness:0.3"></a-sphere>
+          <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
           <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
         </a-entity>
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#fff5e8; intensity:900; distance:22; decay:2; angle:18; penumbra:0.45; target:#torch-beam-target"
-                  torch-flicker="base:900; range:40; speed:3"
+        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:500; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
+                  torch-flicker="base:500; range:25; speed:2.5"
                   torch-raycaster
                   position="0 0.08 0"></a-entity>
       </a-entity>
@@ -553,7 +514,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v48</div>
+<div id="version-overlay">v49</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
