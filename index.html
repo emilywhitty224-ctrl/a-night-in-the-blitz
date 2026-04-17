@@ -414,7 +414,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v38</div>
+<div id="version-overlay">v39</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -470,8 +470,8 @@
     var sun = document.getElementById('sun-light');
     if (sun) sun.setAttribute('light', 'color:#fff8e8; intensity:2.0');
     var sky = document.querySelector('a-sky');
-    if (sky) sky.setAttribute('color', '#ffffff');
-    scene.setAttribute('background', 'color: #ffffff');
+    if (sky) sky.setAttribute('color', '#87ceeb');
+    scene.setAttribute('background', 'color: #87ceeb');
     // Swap to unlit day materials — shows exact baked colours
     var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
     if (sceneGlb && sceneGlb.object3D) {
