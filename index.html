@@ -45,6 +45,7 @@
     };
 
     // ── Night darken — darkens baked GLB textures to blackout levels ─────
+    // Also stores dayMats (unlit MeshBasicMaterial) for day mode toggling
     AFRAME.registerComponent('night-darken', {
       init: function () {
         this.el.addEventListener('model-loaded', function (e) {
@@ -52,8 +53,19 @@
             e.detail.model.traverse(function (node) {
               if (!node.isMesh) return;
               var mats = Array.isArray(node.material) ? node.material : [node.material];
+              var nightMats = [], dayMats = [];
               mats.forEach(function (mat, i) {
-                // Kill emissives and baked maps
+                // Day material — unlit, shows baked colours exactly as exported
+                dayMats.push(new THREE.MeshBasicMaterial({
+                  map: mat.map,
+                  color: mat.map ? new THREE.Color(1,1,1) : mat.color.clone(),
+                  side: THREE.DoubleSide,
+                  transparent: mat.transparent,
+                  opacity: mat.opacity,
+                  alphaTest: mat.alphaTest
+                }));
+
+                // Night material — kill emissives, darken
                 if (mat.emissive) mat.emissive.setRGB(0, 0, 0);
                 mat.emissiveIntensity = 0;
                 if (mat.lightMap) mat.lightMap = null;
@@ -61,42 +73,26 @@
                 if (mat.envMap) mat.envMap = null;
 
                 if (mat.type === 'MeshBasicMaterial') {
-                  // Unlit photogrammetry mesh — convert to Standard so it responds to lights.
-                  // computeVertexNormals() is essential: unlit meshes often have no normals,
-                  // and MeshStandardMaterial needs them for all lighting calculations.
                   if (node.geometry) node.geometry.computeVertexNormals();
-                  // When a texture map exists, use a neutral grey — the texture carries the real
-                  // colour and mat.color may be black (Blender export), which would block it.
-                  var col = mat.map
-                    ? new THREE.Color(0.35, 0.35, 0.35)
-                    : mat.color.clone().multiplyScalar(0.35);
+                  var col = mat.map ? new THREE.Color(0.35, 0.35, 0.35) : mat.color.clone().multiplyScalar(0.35);
                   var replacement = new THREE.MeshStandardMaterial({
-                    map: mat.map,
-                    color: col,
-                    roughness: 0.9,
-                    metalness: 0.0,
-                    side: THREE.DoubleSide,
-                    transparent: mat.transparent,
-                    opacity: mat.opacity,
-                    alphaTest: mat.alphaTest
+                    map: mat.map, color: col, roughness: 0.9, metalness: 0.0,
+                    side: THREE.DoubleSide, transparent: mat.transparent,
+                    opacity: mat.opacity, alphaTest: mat.alphaTest
                   });
                   replacement.needsUpdate = true;
-                  if (Array.isArray(node.material)) {
-                    node.material[i] = replacement;
-                  } else {
-                    node.material = replacement;
-                  }
+                  if (Array.isArray(node.material)) { node.material[i] = replacement; }
+                  else { node.material = replacement; }
+                  nightMats.push(replacement);
                 } else {
-                  // If it has a texture, use neutral grey so the texture carries the colour
-                  // (avoids warm/tinted mat.color from Blender washing the surface)
-                  if (mat.map) {
-                    mat.color.setRGB(0.08, 0.08, 0.08);
-                  } else {
-                    if (mat.color) mat.color.multiplyScalar(0.08);
-                  }
+                  if (mat.map) { mat.color.setRGB(0.08, 0.08, 0.08); }
+                  else { mat.color.setRGB(0.08, 0.08, 0.08); }
                   mat.needsUpdate = true;
+                  nightMats.push(mat);
                 }
               });
+              node.userData.nightMats = nightMats;
+              node.userData.dayMats = dayMats;
             });
           } catch(err) { console.warn('night-darken error:', err); }
         });
@@ -205,16 +201,40 @@
       }
     });
 
-    // ── Torch raycaster — beam hits [audio-trigger] objects, plays audio ──
+    // ── Torch raycaster — wall-aware: only triggers audio if no geometry in the way ──
     AFRAME.registerComponent('torch-raycaster', {
       init: function () {
-        // Raycaster along local +Y (which is world-forward in the torch wrapper)
-        this.el.setAttribute('raycaster', 'direction: 0 1 0; near: 0; far: 15; objects: [audio-trigger]');
-        this.el.addEventListener('raycaster-intersection', function (e) {
-          e.detail.els.forEach(function (el) {
+        this._rc = new THREE.Raycaster();
+        this._rc.far = 15;
+        this._sceneObj = null;
+        this._lastCheck = 0;
+        var self = this;
+        var sceneEl = document.querySelector('[gltf-model="#scene-glb"]');
+        if (sceneEl) {
+          sceneEl.addEventListener('model-loaded', function () {
+            self._sceneObj = sceneEl.object3D;
+          });
+        }
+      },
+      tick: function (t) {
+        if (t - this._lastCheck < 200) return;
+        this._lastCheck = t;
+        if (!this._sceneObj) return;
+        var pos = new THREE.Vector3();
+        var dir = new THREE.Vector3(0, 1, 0);
+        this.el.object3D.getWorldPosition(pos);
+        dir.transformDirection(this.el.object3D.matrixWorld).normalize();
+        this._rc.set(pos, dir);
+        var wallHits = this._rc.intersectObject(this._sceneObj, true);
+        var wallDist = wallHits.length ? wallHits[0].distance : Infinity;
+        var self = this;
+        document.querySelectorAll('[audio-trigger]').forEach(function (el) {
+          if (!el.object3D) return;
+          var hits = self._rc.intersectObject(el.object3D, true);
+          if (hits.length && hits[0].distance < wallDist) {
             var c = el.components['audio-trigger'];
             if (c) c.triggerPlay();
-          });
+          }
         });
       }
     });
@@ -276,16 +296,12 @@
   <a-assets timeout="120000">
     <a-asset-item id="scene-glb" src="a_night_in_the_blitz_10.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
-    <a-asset-item id="navmesh-glb" src="navmesh.glb"></a-asset-item>
   </a-assets>
 
   <!-- Scene -->
   <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1" night-darken></a-entity>
 
-  <!-- Navmesh — invisible, constrains player movement -->
-  <a-entity gltf-model="#navmesh-glb" nav-mesh visible="false"></a-entity>
-
-  <!-- Torch resting on floor at spawn — lying on its side -->
+<!-- Torch resting on floor at spawn — lying on its side -->
   <a-entity id="scene-torch" gltf-model="#torch-glb"
     position="0.3 0.04 -0.5"
     rotation="0 45 90"
@@ -364,7 +380,7 @@
 
   <!-- Player -->
   <a-entity id="rig" position="0 0 0"
-            movement-controls="fly: false; speed: 0.2; camera: #cam; constrainToNavMesh: true"
+            movement-controls="fly: false; speed: 0.2; camera: #cam"
             smooth-turn="speed: 60">
 
     <a-entity id="cam" camera look-controls position="0 1.6 0"></a-entity>
@@ -398,7 +414,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v36</div>
+<div id="version-overlay">v37</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -456,16 +472,12 @@
     var sky = document.querySelector('a-sky');
     if (sky) sky.setAttribute('color', '#ffffff');
     scene.setAttribute('background', 'color: #ffffff');
-    // Restore scene GLB material colours darkened by night-darken
+    // Swap to unlit day materials — shows exact baked colours
     var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
     if (sceneGlb && sceneGlb.object3D) {
       sceneGlb.object3D.traverse(function (node) {
-        if (!node.isMesh) return;
-        var mats = Array.isArray(node.material) ? node.material : [node.material];
-        mats.forEach(function (mat) {
-          mat.color.setRGB(1, 1, 1);
-          mat.needsUpdate = true;
-        });
+        if (!node.isMesh || !node.userData.dayMats) return;
+        node.material = node.userData.dayMats.length === 1 ? node.userData.dayMats[0] : node.userData.dayMats;
       });
     }
     document.getElementById('btn-day').style.borderColor = '#ffffff';
@@ -476,12 +488,8 @@
     var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
     if (sceneGlb && sceneGlb.object3D) {
       sceneGlb.object3D.traverse(function (node) {
-        if (!node.isMesh) return;
-        var mats = Array.isArray(node.material) ? node.material : [node.material];
-        mats.forEach(function (mat) {
-          mat.color.setRGB(0.08, 0.08, 0.08);
-          mat.needsUpdate = true;
-        });
+        if (!node.isMesh || !node.userData.nightMats) return;
+        node.material = node.userData.nightMats.length === 1 ? node.userData.nightMats[0] : node.userData.nightMats;
       });
     }
   }
