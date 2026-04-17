@@ -541,7 +541,7 @@
     });
 
     // ── Torch pickup — on load, in-hand torch is hidden and #scene-torch lies
-    //    on the ground. On grip-down within 0.35m of #scene-torch, swap:
+    //    on the ground. On grip-down within 0.25m of #scene-torch, swap:
     //    hide the floor torch, show the in-hand one, fire haptic, fade hint. ──
     AFRAME.registerComponent('torch-pickup', {
       init: function () {
@@ -660,7 +660,7 @@
   <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
   <a-sky color="#010306"></a-sky>
 
-  <!-- ── Barrage Balloons — silver blimps ~90–130m overhead, slow drift ── -->
+  <!-- ── Barrage Balloons — silver blimps ~28–50m overhead, slow drift ── -->
   <!-- Moonlight (directional from position 4 10 6) glistens off metalness  -->
   <a-entity id="balloon-1" position="3 28 -18" no-fog
     animation="property:position; from:3 28 -18; to:3 30 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
@@ -813,7 +813,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v53</div>
+<div id="version-overlay">v54</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -863,6 +863,31 @@
     });
   }
 
+  // Set ground PBR: wet cobbles at night, dry matte in day. Identifies ground
+  // meshes the same way night-darken does (world-Y top below 0.5m).
+  function _applyGroundPBR(roughness, metalness) {
+    var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
+    if (!sceneGlb || !sceneGlb.object3D) return;
+    sceneGlb.object3D.updateMatrixWorld(true);
+    var top = new THREE.Vector3();
+    sceneGlb.object3D.traverse(function (node) {
+      if (!node.isMesh || !node.geometry) return;
+      if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+      var bb = node.geometry.boundingBox;
+      if (!bb) return;
+      top.set(0, bb.max.y, 0).applyMatrix4(node.matrixWorld);
+      if (top.y >= 0.5) return;
+      var mats = Array.isArray(node.material) ? node.material : [node.material];
+      mats.forEach(function (m) {
+        if (m && 'roughness' in m) {
+          m.roughness = roughness;
+          m.metalness = metalness;
+          m.needsUpdate = true;
+        }
+      });
+    });
+  }
+
   function _setExposure(val) {
     // setAttribute alone is unreliable in A-Frame 1.5 — hit the renderer directly
     var aScene = document.querySelector('a-scene');
@@ -882,6 +907,7 @@
     if (sky) sky.setAttribute('color', '#010306');
     scene.setAttribute('background', 'color: #010306');
     _applySceneColors(0.08, 0.08, 0.08);
+    _applyGroundPBR(0.55, 0.1); // wet cobbles
     document.getElementById('btn-night').style.borderColor = '#ffffff';
     document.getElementById('btn-day').style.borderColor = '#ffcc66';
   }
@@ -899,13 +925,11 @@
     if (sky) sky.setAttribute('color', '#87ceeb');
     scene.setAttribute('background', 'color: #87ceeb');
     _applySceneColors(1.0, 1.0, 1.0);
+    _applyGroundPBR(0.9, 0.0); // dry matte in daylight
     document.getElementById('btn-day').style.borderColor = '#ffffff';
     document.getElementById('btn-night').style.borderColor = '#aaccff';
   }
 
-  function setNightMaterials() {
-    _applySceneColors(0.08, 0.08, 0.08);
-  }
 </script>
 </body>
 </html>
