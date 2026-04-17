@@ -431,6 +431,55 @@
       }
     });
 
+    // ── Torch pickup — on load, in-hand torch is hidden and #scene-torch lies
+    //    on the ground. On grip-down within 0.35m of #scene-torch, swap:
+    //    hide the floor torch, show the in-hand one, fire haptic, fade hint. ──
+    AFRAME.registerComponent('torch-pickup', {
+      init: function () {
+        this._pickedUp = false;
+        this._sceneTorch = null;
+        this._torch = null;
+        this._hint = null;
+        var self = this;
+        // Components init before children/siblings attach their models, so
+        // defer the initial visibility flip to the first tick.
+        this._needsHideTorch = true;
+        this.el.addEventListener('gripdown', function () { self._tryPickup(); });
+      },
+      _resolve: function () {
+        if (!this._sceneTorch) this._sceneTorch = document.getElementById('scene-torch');
+        if (!this._torch) this._torch = document.getElementById('torch');
+        if (!this._hint) this._hint = document.getElementById('pickup-hint');
+      },
+      _tryPickup: function () {
+        if (this._pickedUp) return;
+        this._resolve();
+        if (!this._sceneTorch || !this._torch) return;
+        var handPos = new THREE.Vector3();
+        var torchPos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(handPos);
+        this._sceneTorch.object3D.getWorldPosition(torchPos);
+        if (handPos.distanceTo(torchPos) >= 0.35) return;
+        this._pickedUp = true;
+        this._sceneTorch.setAttribute('visible', false);
+        this._torch.setAttribute('visible', true);
+        if (this._hint) this._hint.setAttribute('visible', false);
+        var gp = this.el.components['oculus-touch-controls'];
+        if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+          gp.controller.hapticActuators[0].pulse(0.7, 120);
+        }
+      },
+      tick: function () {
+        if (this._needsHideTorch) {
+          this._resolve();
+          if (this._torch) {
+            this._torch.setAttribute('visible', false);
+            this._needsHideTorch = false;
+          }
+        }
+      }
+    });
+
     // ── Raycaster warm-up — first raycast into a big Draco scene is slow;
     //    do a dummy one on scene-loaded so the first real point doesn't freeze ──
     AFRAME.registerComponent('raycaster-warmup', {
@@ -472,12 +521,16 @@
   <!-- Scene -->
   <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1" night-darken></a-entity>
 
-<!-- Torch resting on floor at spawn — lying on its side -->
+<!-- Torch resting on floor at spawn — user picks it up with right grip -->
   <a-entity id="scene-torch" gltf-model="#torch-glb"
     position="0.3 0.04 -0.5"
     rotation="0 45 90"
     scale="0.075 0.075 0.075"
     matte-darken></a-entity>
+
+  <!-- Pickup hint — floats above the floor torch, hidden on pickup -->
+  <a-entity id="pickup-hint" position="0.3 0.35 -0.5" rotation="-35 0 0"
+    text="value: Grip to pick up; align:center; color:#ffddaa; width:0.6; side:double"></a-entity>
 
   <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
   <a-sky color="#010306"></a-sky>
@@ -606,7 +659,7 @@
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle brightness-cycle audio-unlock-vr>
+              torch-toggle brightness-cycle audio-unlock-vr torch-pickup>
       <!-- Torch model — held in right hand, points forward (-Z) -->
       <!-- down 5cm (-0.07), back 10cm (+0.05 in controller Z = toward player) -->
       <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
@@ -632,7 +685,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v51</div>
+<div id="version-overlay">v52</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
