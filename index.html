@@ -403,10 +403,10 @@
       <a-entity id="torch" position="0 -0.07 0.05" rotation="-90 0 0">
         <!-- Moonlight bounce inside torch so it toggles off with it -->
         <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — wide cap (lens) faces forward (+Y in wrapper = toward scene) -->
-        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 180 0" position="0 0 0" night-darken></a-entity>
-        <!-- Bulb glow — at the wide lens cap end -->
-        <a-entity id="torch-glow" position="0 0.055 0">
+        <!-- Torch GLB model — beam points +Y (forward); wide cap faces -Y (toward player) -->
+        <a-entity gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 180 0" position="0 0 0" night-darken></a-entity>
+        <!-- Bulb glow — at the wide lens cap (-Y end) -->
+        <a-entity id="torch-glow" position="0 -0.055 0">
           <a-sphere radius="0.003" material="shader:standard; color:#ffcc66; emissive:#ffaa33; emissiveIntensity:4; roughness:0.3"></a-sphere>
           <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
         </a-entity>
@@ -423,7 +423,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v31</div>
+<div id="version-overlay">v32</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -465,13 +465,13 @@
     var sky = document.querySelector('a-sky');
     if (sky) sky.setAttribute('color', '#010306');
     scene.setAttribute('background', 'color: #010306');
+    setNightMaterials();
     document.getElementById('btn-night').style.borderColor = '#ffffff';
     document.getElementById('btn-day').style.borderColor = '#ffcc66';
   }
 
   function setDay() {
     var scene = document.querySelector('a-scene');
-    // Raise exposure to standard (1.0) — this is the main reason night mode looks dark
     scene.setAttribute('renderer', 'exposure', 1.0);
     scene.setAttribute('fog', 'type:linear; color:#87ceeb; near:30; far:120');
     var ambient = document.getElementById('scene-ambient');
@@ -481,8 +481,36 @@
     var sky = document.querySelector('a-sky');
     if (sky) sky.setAttribute('color', '#ffffff');
     scene.setAttribute('background', 'color: #ffffff');
+    // Restore scene GLB material colours darkened by night-darken
+    var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
+    if (sceneGlb && sceneGlb.object3D) {
+      sceneGlb.object3D.traverse(function (node) {
+        if (!node.isMesh) return;
+        var mats = Array.isArray(node.material) ? node.material : [node.material];
+        mats.forEach(function (mat) {
+          if (mat.map) { mat.color.setRGB(0.5, 0.5, 0.5); }
+          else { mat.color.setRGB(0.35, 0.35, 0.35); }
+          mat.needsUpdate = true;
+        });
+      });
+    }
     document.getElementById('btn-day').style.borderColor = '#ffffff';
     document.getElementById('btn-night').style.borderColor = '#aaccff';
+  }
+
+  function setNightMaterials() {
+    var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
+    if (sceneGlb && sceneGlb.object3D) {
+      sceneGlb.object3D.traverse(function (node) {
+        if (!node.isMesh) return;
+        var mats = Array.isArray(node.material) ? node.material : [node.material];
+        mats.forEach(function (mat) {
+          if (mat.map) { mat.color.setRGB(0.08, 0.08, 0.08); }
+          else { mat.color.multiplyScalar(0.08); }
+          mat.needsUpdate = true;
+        });
+      });
+    }
   }
 </script>
 </body>
