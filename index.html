@@ -124,15 +124,17 @@
     });
 
     // ── Brightness cycle — right B button cycles through scene presets ───
+    //    Targets torch-flicker.data.base (light.intensity is overwritten
+    //    every frame by the flicker tick, so setting it directly is a no-op).
     AFRAME.registerComponent('brightness-cycle', {
       init: function () {
         var presets = [
-          { label:'very dark',  ambient:0.06,  torch:300  },
-          { label:'dark',       ambient:0.12,  torch:600  },
-          { label:'medium',     ambient:0.25,  torch:1000 },
-          { label:'bright',     ambient:0.5,   torch:1750 }
+          { label:'very dark',  ambient:0.06,  torch:150 },
+          { label:'dark',       ambient:0.12,  torch:300 },
+          { label:'medium',     ambient:0.25,  torch:500 },
+          { label:'bright',     ambient:0.5,   torch:800 }
         ];
-        var idx = 1; // start on 'dark'
+        var idx = 2; // start on 'medium' — matches current torch base of 500
         function bind() {
           var rightCtrl = document.querySelector('[oculus-touch-controls*="right"]');
           if (!rightCtrl) { setTimeout(bind, 500); return; }
@@ -143,8 +145,10 @@
               var ambient = document.getElementById('scene-ambient');
               if (ambient) ambient.setAttribute('light', 'intensity', p.ambient);
               var torchEl = document.getElementById('torch-point');
-              if (torchEl) torchEl.setAttribute('light', 'intensity', p.torch);
-              // Short double-buzz so you know it changed
+              if (torchEl) {
+                var flicker = torchEl.components['torch-flicker'];
+                if (flicker) flicker.data.base = p.torch;
+              }
               var gp = rightCtrl.components['oculus-touch-controls'];
               if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
                 gp.controller.hapticActuators[0].pulse(0.3, 40);
@@ -218,55 +222,25 @@
       }
     });
 
-    // ── Audio trigger — attach to any scene object; torch beam plays it ──
+    // ── Audio trigger — delegates playback to A-Frame's sound component.
+    //    The sound component is configured with positional:true on the
+    //    entity, so the playback is spatialised automatically.
     AFRAME.registerComponent('audio-trigger', {
-      schema: {
-        src:  { type: 'string',  default: '' },
-        once: { type: 'boolean', default: true }
-      },
-      init: function () {
-        this._played = false;
-        this._audio  = null;
-        this._src    = this.data.src ? this.data.src.trim() : '';
-        if (this._src) {
-          if (this._src.charAt(0) === '#') {
-            this._audio = document.querySelector(this._src);
-          } else {
-            this._audio = new Audio(this._src);
-          }
-        }
-      },
+      schema: { once: { type: 'boolean', default: true } },
+      init: function () { this._played = false; },
       triggerPlay: function () {
         if (this.data.once && this._played) return;
-        if (!this._audio && this._src && this._src.charAt(0) === '#') {
-          this._audio = document.querySelector(this._src);
-        }
-        if (this._audio) {
-          var self = this;
-          try { if (this._audio.currentTime > 0) this._audio.currentTime = 0; } catch(e) {}
-          var p = this._audio.play();
-          if (p && p.then) {
-            p.then(function () { self._played = true; })
-             .catch(function (e) { console.warn('[audio-trigger]', e); });
-          } else {
-            this._played = true;
-          }
-        } else {
-          this._played = true;
-          this._beep();
-        }
-      },
-      _beep: function () {
+        var sound = this.el.components.sound;
+        if (!sound) return;
+        var pool = sound.pool;
+        if (!pool || !pool.children.length) return;
+        var audio = pool.children[0];
+        if (!audio || !audio.buffer) return; // buffer still loading — retry on next raycast
         try {
-          var ctx = AFRAME.THREE.AudioContext.getContext();
-          var osc = ctx.createOscillator();
-          var gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.frequency.value = 520;
-          gain.gain.setValueAtTime(0.25, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
-          osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 1.5);
-        } catch (e) { console.warn('[audio-trigger] beep failed:', e); }
+          sound.stopSound();
+          sound.playSound();
+          this._played = true;
+        } catch(e) { console.warn('[audio-trigger]', e); }
       }
     });
 
@@ -321,8 +295,6 @@
       try {
         var ctx = AFRAME.THREE.AudioContext.getContext();
         if (ctx && ctx.state === 'suspended') ctx.resume();
-        var a = document.getElementById('blitz-audio');
-        if (a && a.readyState < 2) { try { a.load(); } catch(e) {} }
       } catch(e) {}
     }
     ['click','touchstart','touchend'].forEach(function (ev) {
@@ -334,6 +306,128 @@
         var evs = ['abuttondown','bbuttondown','xbuttondown','ybuttondown','triggerdown','gripdown','thumbstickdown'];
         var self = this;
         evs.forEach(function (e) { self.el.addEventListener(e, _unlockAudio); });
+      }
+    });
+
+    // ── Breath condensation — faint cloudy puff expanding from camera,
+    //    pulses every 4.5s. Low-opacity sphere, only reads against the dark.
+    AFRAME.registerComponent('breath-puff', {
+      init: function () {
+        this._t = Math.random() * 3;
+        this._period = 4.5;
+        this._duration = 1.4;
+        this._mesh = null;
+      },
+      tick: function (t, dt) {
+        if (!this._mesh) this._mesh = this.el.getObject3D('mesh');
+        if (!this._mesh || !this._mesh.material) return;
+        this._t += dt * 0.001;
+        var cycle = this._t % this._period;
+        if (cycle < this._duration) {
+          var p = cycle / this._duration;
+          this._mesh.material.opacity = Math.sin(p * Math.PI) * 0.22;
+          var s = 0.4 + p * 1.8;
+          this.el.object3D.scale.set(s, s, s);
+        } else if (this._mesh.material.opacity !== 0) {
+          this._mesh.material.opacity = 0;
+        }
+      }
+    });
+
+    // ── Distant explosions — scene-level component.
+    //    Every 20–40s: brief directional-light flash + emissive horizon sphere
+    //    from a random compass heading, followed 2–3s later by a filtered
+    //    noise-burst rumble panned toward that same direction.
+    AFRAME.registerComponent('distant-explosions', {
+      init: function () {
+        this._elapsed = 0;
+        this._next = 5 + Math.random() * 10; // first one 5–15s in
+      },
+      tick: function (t, dt) {
+        this._elapsed += dt * 0.001;
+        if (this._elapsed >= this._next) {
+          this._elapsed = 0;
+          this._next = 20 + Math.random() * 20;
+          this._fire();
+        }
+      },
+      _fire: function () {
+        var angle = Math.random() * Math.PI * 2;
+        var dx = Math.cos(angle);
+        var dz = Math.sin(angle);
+
+        // Horizon glow — large flat-shaded emissive sphere far away
+        var glow = document.createElement('a-entity');
+        var gx = dx * 250, gz = dz * 250;
+        glow.setAttribute('geometry', 'primitive:sphere; radius:25; segmentsWidth:12; segmentsHeight:8');
+        glow.setAttribute('material', 'shader:flat; color:#ff9550; opacity:0; transparent:true; fog:false');
+        glow.setAttribute('position', gx + ' 8 ' + gz);
+        this.el.appendChild(glow);
+
+        // Directional light pulse from the same azimuth
+        var light = document.createElement('a-light');
+        light.setAttribute('type', 'directional');
+        light.setAttribute('color', '#ffd4a0');
+        light.setAttribute('intensity', 0);
+        light.setAttribute('position', (dx * 30) + ' 12 ' + (dz * 30));
+        this.el.appendChild(light);
+
+        // Two-stage flash: bright peak, dim tail, cleanup
+        requestAnimationFrame(function () {
+          glow.setAttribute('material', 'opacity', 0.7);
+          light.setAttribute('light', 'intensity', 2.5);
+        });
+        setTimeout(function () {
+          glow.setAttribute('material', 'opacity', 0.35);
+          light.setAttribute('light', 'intensity', 1.0);
+        }, 140);
+        setTimeout(function () {
+          glow.setAttribute('material', 'opacity', 0);
+          light.setAttribute('light', 'intensity', 0);
+        }, 450);
+        setTimeout(function () {
+          if (glow.parentNode) glow.parentNode.removeChild(glow);
+          if (light.parentNode) light.parentNode.removeChild(light);
+        }, 700);
+
+        // Delayed rumble — sound travels ~340 m/s, 250 m → ~0.7s, but we
+        // exaggerate to 2–3s for dramatic effect (explosions feel further away).
+        var self = this;
+        var delay = 2000 + Math.random() * 1000;
+        setTimeout(function () { self._rumble(dx); }, delay);
+      },
+      _rumble: function (pan) {
+        try {
+          var ctx = AFRAME.THREE.AudioContext.getContext();
+          if (!ctx || ctx.state === 'suspended') return;
+          var duration = 1.5 + Math.random() * 0.8;
+          var bufferSize = Math.floor(ctx.sampleRate * duration);
+          var buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+          var data = buffer.getChannelData(0);
+          for (var i = 0; i < bufferSize; i++) { data[i] = Math.random() * 2 - 1; }
+          var src = ctx.createBufferSource();
+          src.buffer = buffer;
+          var filter = ctx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 90;
+          filter.Q.value = 1.5;
+          var gain = ctx.createGain();
+          gain.gain.setValueAtTime(0, ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.25);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+          src.connect(filter);
+          filter.connect(gain);
+          var panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+          if (panner) {
+            panner.pan.value = Math.max(-1, Math.min(1, pan));
+            gain.connect(panner);
+            panner.connect(ctx.destination);
+          } else {
+            gain.connect(ctx.destination);
+          }
+          src.start(ctx.currentTime);
+          src.stop(ctx.currentTime + duration);
+        } catch(e) { console.warn('[rumble]', e); }
       }
     });
 
@@ -363,6 +457,7 @@
 <a-scene
   draco-loader
   raycaster-warmup
+  distant-explosions
   fog="type: linear; color: #010306; near: 4; far: 18"
   renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.06"
   background="color: #010306"
@@ -372,7 +467,6 @@
   <a-assets timeout="300000">
     <a-asset-item id="scene-glb" src="a_night_in_the_blitz_14.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
-    <audio id="blitz-audio" src="blitz_audio_test.mp4" preload="auto" crossorigin="anonymous"></audio>
   </a-assets>
 
   <!-- Scene -->
@@ -433,9 +527,10 @@
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <!-- ── Audio trigger — invisible zone at Blender (1.9018, 15.302, 1.0607) ── -->
-  <!-- transparent material keeps mesh in raycaster scene graph; visible=false would break it -->
-  <a-entity position="1.9018 1.0607 -15.302" audio-trigger="src: #blitz-audio; once: true"
+  <!-- ── Audio trigger — positional radio, louder as you approach ────────── -->
+  <!-- sound component with positional:true routes playback through a PannerNode -->
+  <a-entity position="1.9018 1.0607 -15.302" audio-trigger="once: true"
+    sound="src: url(blitz_audio_test.mp4); positional: true; distanceModel: inverse; refDistance: 2; rolloffFactor: 2; volume: 1; autoplay: false; loop: false"
     geometry="primitive:sphere; radius:0.5"
     material="opacity:0; transparent:true; side:double">
   </a-entity>
@@ -483,7 +578,12 @@
             movement-controls="fly: false; speed: 0.2; camera: #cam"
             smooth-turn="speed: 60">
 
-    <a-entity id="cam" camera look-controls position="0 1.6 0"></a-entity>
+    <a-entity id="cam" camera look-controls position="0 1.6 0">
+      <!-- Breath condensation — faint puff, only visible against the dark -->
+      <a-entity breath-puff position="0 -0.06 -0.28"
+        geometry="primitive:sphere; radius:0.04; segmentsWidth:12; segmentsHeight:8"
+        material="color:#e8f0f8; opacity:0; transparent:true; depthWrite:false; fog:false"></a-entity>
+    </a-entity>
 
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
@@ -514,7 +614,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v49</div>
+<div id="version-overlay">v50</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
