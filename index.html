@@ -144,6 +144,7 @@
                   else { node.material = replacement; }
                 } else {
                   mat.color.setRGB(0.28, 0.3, 0.38);
+                  mat.side = THREE.DoubleSide;
                   mat.needsUpdate = true;
                 }
               });
@@ -236,43 +237,6 @@
       }
     });
 
-    // ── Brightness cycle — right B button cycles through scene presets ───
-    //    Targets torch-flicker.data.base (light.intensity is overwritten
-    //    every frame by the flicker tick, so setting it directly is a no-op).
-    AFRAME.registerComponent('brightness-cycle', {
-      init: function () {
-        var presets = [
-          { label:'very dark',  ambient:0.06,  torch:112 },
-          { label:'dark',       ambient:0.12,  torch:225 },
-          { label:'medium',     ambient:0.25,  torch:375 },
-          { label:'bright',     ambient:0.5,   torch:600 }
-        ];
-        var idx = 2; // start on 'medium' — matches current torch base of 375
-        function bind() {
-          var rightCtrl = document.querySelector('[oculus-touch-controls*="right"]');
-          if (!rightCtrl) { setTimeout(bind, 500); return; }
-          rightCtrl.addEventListener('bbuttondown', function () {
-            try {
-              idx = (idx + 1) % presets.length;
-              var p = presets[idx];
-              var ambient = document.getElementById('scene-ambient');
-              if (ambient) ambient.setAttribute('light', 'intensity', p.ambient);
-              var torchEl = document.getElementById('torch-point');
-              if (torchEl) {
-                var flicker = torchEl.components['torch-flicker'];
-                if (flicker) flicker.data.base = p.torch;
-              }
-              var gp = rightCtrl.components['oculus-touch-controls'];
-              if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
-                gp.controller.hapticActuators[0].pulse(0.3, 40);
-              }
-              console.log('[brightness] preset:', p.label);
-            } catch(e) {}
-          });
-        }
-        bind();
-      }
-    });
 
     // ── Torch toggle — right A button (beam only, model stays visible) ──────
     AFRAME.registerComponent('torch-toggle', {
@@ -301,19 +265,37 @@
       }
     });
 
-    // ── Torch raycaster — relies on A-Frame's built-in raycaster which is
-    //    already filtered to [audio-trigger] objects only, so no manual
-    //    wall-occlusion check is needed (and running intersectObjects against
-    //    all scene meshes on every hit was the source of the radio freeze). ──
+    // ── Torch raycaster — filtered to [audio-trigger] objects only.
+    //    When a trigger is hit, a single one-shot occlusion check fires toward
+    //    the trigger against the scene GLB only. This avoids scanning all meshes
+    //    every tick (the freeze cause), while still blocking signals through walls.
     AFRAME.registerComponent('torch-raycaster', {
       init: function () {
         this.el.setAttribute('raycaster', 'direction: 0 1 0; near: 0; far: 15; objects: [audio-trigger]');
+        this._wallRC = new THREE.Raycaster();
+        var self = this;
         this.el.addEventListener('raycaster-intersection', function (e) {
           e.detail.els.forEach(function (triggerEl) {
+            if (self._isOccluded(triggerEl)) return;
             var c = triggerEl.components['audio-trigger'];
             if (c) c.triggerPlay();
           });
         });
+      },
+      _isOccluded: function (triggerEl) {
+        var sceneEl = document.querySelector('[gltf-model="#scene-glb"]');
+        if (!sceneEl || !sceneEl.object3D) return false;
+        var torchPos = new THREE.Vector3();
+        var tgtPos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(torchPos);
+        triggerEl.object3D.getWorldPosition(tgtPos);
+        var dir = tgtPos.clone().sub(torchPos);
+        var dist = dir.length();
+        dir.normalize();
+        this._wallRC.set(torchPos, dir);
+        this._wallRC.far = dist - 0.15;
+        var hits = this._wallRC.intersectObject(sceneEl.object3D, true);
+        return hits.length > 0;
       }
     });
 
@@ -1096,7 +1078,7 @@
   loading-screen="dotsColor: #ffee88; backgroundColor: #000">
 
   <a-assets timeout="300000">
-    <a-asset-item id="scene-glb" src="a_night_in_the_blitz_15.glb"></a-asset-item>
+    <a-asset-item id="scene-glb" src="a_night_in_the_blitz_17.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
   </a-assets>
 
@@ -1226,7 +1208,7 @@
   <a-entity id="searchlights">
 
     <!-- SL1 — close NW, rooftop height, wide lazy sweep -->
-    <a-entity position="-22 8 -28">
+    <a-entity position="-22 14 -28">
       <!-- Arc-lamp housing: bright core + halo + short glow ring -->
       <a-sphere radius="0.22" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
@@ -1253,7 +1235,7 @@
     </a-entity>
 
     <!-- SL2 — close N, tight pitched sweep -->
-    <a-entity position="6 9 -34">
+    <a-entity position="6 15 -34">
       <a-sphere radius="0.22" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
@@ -1275,7 +1257,7 @@
     </a-entity>
 
     <!-- SL3 — close NE, slightly higher rooftop -->
-    <a-entity position="26 10 -32">
+    <a-entity position="26 16 -32">
       <a-sphere radius="0.22" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
@@ -1297,7 +1279,7 @@
     </a-entity>
 
     <!-- SL4 — behind player (S), close -->
-    <a-entity position="-10 9 32">
+    <a-entity position="-10 15 32">
       <a-sphere radius="0.22" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
@@ -1386,7 +1368,7 @@
   </a-entity>
 
   <!-- Lighting -->
-  <a-light id="scene-ambient" type="ambient" color="#1e2a42" intensity="0.45"></a-light>
+  <a-light id="scene-ambient" type="ambient" color="#1e2a42" intensity="0.06"></a-light>
   <!-- Sun — off by default, switched on by day mode panel -->
   <a-light id="sun-light" type="directional" color="#fff8e8" intensity="0" position="-3 10 5"></a-light>
   <!-- Moonlight — cool blue-white directional, from the moon disc's direction -->
@@ -1417,7 +1399,7 @@
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle brightness-cycle audio-unlock-vr>
+              torch-toggle audio-unlock-vr>
       <!-- Torch model — held in right hand from spawn, points forward (-Z) -->
       <!-- down 5cm (-0.07), back 10cm (+0.05 in controller Z = toward player) -->
       <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
@@ -1433,8 +1415,8 @@
         <!-- Spotlight target — far forward so beam follows hand direction -->
         <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
         <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:375; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
-                  torch-flicker="base:375; range:25; speed:2.5"
+        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
+                  torch-flicker="base:112; range:25; speed:2.5"
                   torch-raycaster
                   position="0 0.08 0"></a-entity>
       </a-entity>
@@ -1443,7 +1425,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v62</div>
+<div id="version-overlay">v63</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
