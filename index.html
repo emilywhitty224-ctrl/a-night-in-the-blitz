@@ -301,38 +301,15 @@
       }
     });
 
-    // ── Torch raycaster — A-Frame built-in raycaster (fast), wall-check only on hit.
-    //    Caches a flat mesh list from the scene GLB at load, so per-ray
-    //    intersections skip the hierarchical traversal (big Draco scenes freeze
-    //    the main thread otherwise — that was the torch-at-radio hitch). ──────
+    // ── Torch raycaster — relies on A-Frame's built-in raycaster which is
+    //    already filtered to [audio-trigger] objects only, so no manual
+    //    wall-occlusion check is needed (and running intersectObjects against
+    //    all scene meshes on every hit was the source of the radio freeze). ──
     AFRAME.registerComponent('torch-raycaster', {
       init: function () {
-        this._rc = new THREE.Raycaster();
-        this._rc.far = 15;
-        this._sceneMeshes = null;
-        var self = this;
-        var sceneEl = document.querySelector('[gltf-model="#scene-glb"]');
-        if (sceneEl) {
-          sceneEl.addEventListener('model-loaded', function () {
-            var meshes = [];
-            sceneEl.object3D.traverse(function (n) { if (n.isMesh) meshes.push(n); });
-            self._sceneMeshes = meshes;
-          });
-        }
         this.el.setAttribute('raycaster', 'direction: 0 1 0; near: 0; far: 15; objects: [audio-trigger]');
         this.el.addEventListener('raycaster-intersection', function (e) {
           e.detail.els.forEach(function (triggerEl) {
-            if (self._sceneMeshes && self._sceneMeshes.length) {
-              var pos = new THREE.Vector3();
-              var dir = new THREE.Vector3(0, 1, 0);
-              self.el.object3D.getWorldPosition(pos);
-              dir.transformDirection(self.el.object3D.matrixWorld).normalize();
-              self._rc.set(pos, dir);
-              var wallHits = self._rc.intersectObjects(self._sceneMeshes, false);
-              var wallDist = wallHits.length ? wallHits[0].distance : Infinity;
-              var triggerHits = self._rc.intersectObject(triggerEl.object3D, true);
-              if (!triggerHits.length || triggerHits[0].distance >= wallDist) return;
-            }
             var c = triggerEl.components['audio-trigger'];
             if (c) c.triggerPlay();
           });
@@ -1141,49 +1118,85 @@
       material="shader:flat; color:#8aa0d8; opacity:0.09; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
   </a-entity>
 
-  <!-- ── Barrage Balloons — silver blimps ~28–50m overhead, slow drift ── -->
-  <!-- Moonlight (directional from position 4 10 6) glistens off metalness  -->
+  <!-- ── Barrage Balloons — silver fabric blimps, moonlit, no self-glow.
+       Scale is length:height:depth — real balloons were ~19m long but these
+       are kept proportionally convincing for the scene. Fins at the tail
+       (-X side of the elongated sphere) stabilise the shape visually.     -->
+
   <a-entity id="balloon-1" position="3 15 -18" no-fog
     animation="property:position; from:3 15 -18; to:3 16.2 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -4; to:0 25 4; dur:38000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="3.2 1 1.1" radius="1"
-      material="shader:standard; color:#b0bcc8; metalness:0.65; roughness:0.22; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="15" color="#666" position="0 -7.5 0"
-      material="color:#777; opacity:0.35; transparent:true"></a-cylinder>
+    <a-sphere scale="6 2 2" radius="1"
+      material="shader:standard; color:#7a8e9a; metalness:0.22; roughness:0.55; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
+    <!-- Dorsal fin -->
+    <a-box width="0.12" height="1.6" depth="0.9" position="-5.6 1.4 0"
+      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <!-- Port fin -->
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.6 0.2 -1.1" rotation="0 0 -50"
+      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <!-- Starboard fin -->
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.6 0.2 1.1" rotation="0 0 50"
+      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-cylinder radius="0.014" height="15" color="#555" position="0 -7.5 0"
+      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-2" position="-2 20 -28" no-fog
     animation="property:position; from:-2 20 -28; to:-2 21.5 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 3; to:0 -30 -3; dur:44000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="3.4 1 1.15" radius="1"
-      material="shader:standard; color:#aab8c4; metalness:0.65; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="20" color="#666" position="0 -10 0"
-      material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
+    <a-sphere scale="7 2.2 2.2" radius="1"
+      material="shader:standard; color:#788a96; metalness:0.2; roughness:0.58; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
+    <a-box width="0.12" height="1.8" depth="1.0" position="-6.6 1.6 0"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.6" depth="1.0" position="-6.6 0.2 -1.2" rotation="0 0 -50"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.6" depth="1.0" position="-6.6 0.2 1.2" rotation="0 0 50"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-cylinder radius="0.014" height="20" color="#555" position="0 -10 0"
+      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-3" position="11 17 -22" no-fog
     animation="property:position; from:11 17 -22; to:11 18.5 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -6; to:0 20 5; dur:32000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="3.3 1 1.1" radius="1"
-      material="shader:standard; color:#b4c0cc; metalness:0.68; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="17" color="#666" position="0 -8.5 0"
-      material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
+    <a-sphere scale="6.5 2.1 2.1" radius="1"
+      material="shader:standard; color:#7c8e9c; metalness:0.24; roughness:0.52; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
+    <a-box width="0.12" height="1.7" depth="0.95" position="-6.1 1.5 0"
+      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.5" depth="0.95" position="-6.1 0.2 -1.15" rotation="0 0 -50"
+      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.5" depth="0.95" position="-6.1 0.2 1.15" rotation="0 0 50"
+      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-cylinder radius="0.014" height="17" color="#555" position="0 -8.5 0"
+      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-4" position="18 22 -12" no-fog
     animation="property:position; from:18 22 -12; to:18 23.5 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 4; to:0 -18 -4; dur:50000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="3.1 1 1.05" radius="1"
-      material="shader:standard; color:#b8c4d0; metalness:0.62; roughness:0.24; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
+    <a-sphere scale="5.8 2 2" radius="1"
+      material="shader:standard; color:#7a8c98; metalness:0.2; roughness:0.56; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
+    <a-box width="0.12" height="1.6" depth="0.9" position="-5.4 1.4 0"
+      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.4 0.2 -1.1" rotation="0 0 -50"
+      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.4 0.2 1.1" rotation="0 0 50"
+      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
   </a-entity>
 
   <a-entity id="balloon-5" position="-6 16 -10" no-fog
     animation="property:position; from:-6 16 -10; to:-6 17.2 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="3.3 1 1.1" radius="1"
-      material="shader:standard; color:#acbac6; metalness:0.67; roughness:0.21; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="16" color="#666" position="0 -8 0"
-      material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
+    <a-sphere scale="6.2 2 2" radius="1"
+      material="shader:standard; color:#788c9a; metalness:0.22; roughness:0.54; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
+    <a-box width="0.12" height="1.6" depth="0.9" position="-5.8 1.4 0"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.8 0.2 -1.1" rotation="0 0 -50"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-box width="0.12" height="1.4" depth="0.9" position="-5.8 0.2 1.1" rotation="0 0 50"
+      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
+    <a-cylinder radius="0.014" height="16" color="#555" position="0 -8 0"
+      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <!-- ── Audio trigger — positional radio, louder as you approach.
@@ -1430,7 +1443,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v61</div>
+<div id="version-overlay">v62</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
