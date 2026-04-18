@@ -668,33 +668,243 @@
       }
     });
 
+    // ── AA battery — rooftop anti-aircraft gun position. Fires bursts of
+    //    3–7 shots on random intervals, each shot a brief muzzle flash
+    //    (pooled emissive sphere, opacity animated) + a synthesised pop
+    //    (bandpassed noise burst, panned by world direction from the cam).
+    //    Real WWII AA guns (Bofors 40mm, 3.7" QF) fired in short bursts;
+    //    staggering shots 140–220ms apart approximates their cadence. ─────
+    AFRAME.registerComponent('aa-battery', {
+      schema: {
+        burstMin:     { default: 3 },
+        burstMax:     { default: 7 },
+        shotInterval: { default: 170 }, // ms between shots, + jitter
+        nextFireMin:  { default: 8 },
+        nextFireMax:  { default: 22 },
+        flashColor:   { default: '#ffd47a' },
+        flashRadius:  { default: 0.45 },
+        popVolume:    { default: 0.28 }
+      },
+      init: function () {
+        this._elapsed = 0;
+        this._next = 2 + Math.random() * 6;
+        // Persistent flash entity — reused every shot to avoid DOM churn.
+        var flash = document.createElement('a-entity');
+        flash.setAttribute('geometry',
+          'primitive:sphere; radius:' + this.data.flashRadius + '; segmentsWidth:10; segmentsHeight:8');
+        flash.setAttribute('material',
+          'shader:flat; color:' + this.data.flashColor + '; opacity:0; transparent:true; fog:false; depthWrite:false');
+        flash.setAttribute('no-fog', '');
+        this.el.appendChild(flash);
+        this._flashEl = flash;
+      },
+      tick: function (t, dt) {
+        this._elapsed += dt * 0.001;
+        if (this._elapsed >= this._next) {
+          this._elapsed = 0;
+          this._next = this.data.nextFireMin +
+            Math.random() * (this.data.nextFireMax - this.data.nextFireMin);
+          this._burst();
+        }
+      },
+      _burst: function () {
+        var shots = Math.floor(
+          this.data.burstMin + Math.random() *
+          (this.data.burstMax - this.data.burstMin + 1)
+        );
+        var self = this;
+        for (var i = 0; i < shots; i++) {
+          var delay = i * (this.data.shotInterval + (Math.random() - 0.5) * 80);
+          setTimeout(function () { self._fire(); }, delay);
+        }
+      },
+      _fire: function () {
+        this._muzzleFlash();
+        this._pop();
+      },
+      _muzzleFlash: function () {
+        var mesh = this._flashEl.getObject3D('mesh');
+        if (!mesh || !mesh.material) return;
+        // Bright peak, wider dim tail, cleanup
+        mesh.material.opacity = 1.0;
+        this._flashEl.object3D.scale.set(1, 1, 1);
+        var el = this._flashEl;
+        setTimeout(function () {
+          if (!mesh.material) return;
+          mesh.material.opacity = 0.55;
+          el.object3D.scale.set(1.8, 1.8, 1.8);
+        }, 35);
+        setTimeout(function () {
+          if (mesh.material) mesh.material.opacity = 0;
+          el.object3D.scale.set(1, 1, 1);
+        }, 150);
+      },
+      _pop: function () {
+        try {
+          var ctx = AFRAME.THREE.AudioContext.getContext();
+          if (!ctx || ctx.state === 'suspended') return;
+          var duration = 0.22;
+          var bufferSize = Math.floor(ctx.sampleRate * duration);
+          var buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+          var data = buffer.getChannelData(0);
+          // White noise with fast cubic decay envelope → sharp crack
+          for (var i = 0; i < bufferSize; i++) {
+            var env = Math.pow(1 - i / bufferSize, 3);
+            data[i] = (Math.random() * 2 - 1) * env;
+          }
+          var src = ctx.createBufferSource();
+          src.buffer = buffer;
+          // Bandpass around 350 Hz → "thud-crack" AA signature (lower Q = broader)
+          var filter = ctx.createBiquadFilter();
+          filter.type = 'bandpass';
+          filter.frequency.value = 350 + Math.random() * 120;
+          filter.Q.value = 0.7;
+          var gain = ctx.createGain();
+          gain.gain.setValueAtTime(this.data.popVolume, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+          src.connect(filter);
+          filter.connect(gain);
+          // Pan by direction from camera — stereo only, HRTF via A-Frame's
+          // listener would be ideal but avoids listener setup overhead here.
+          var cam = document.getElementById('cam');
+          var camPos = new THREE.Vector3();
+          var srcPos = new THREE.Vector3();
+          if (cam) cam.object3D.getWorldPosition(camPos);
+          this.el.object3D.getWorldPosition(srcPos);
+          var dx = srcPos.x - camPos.x;
+          var dz = srcPos.z - camPos.z;
+          var horiz = Math.sqrt(dx*dx + dz*dz);
+          var pan = horiz > 0.01 ? Math.max(-1, Math.min(1, dx / horiz)) : 0;
+          var panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+          if (panner) {
+            panner.pan.value = pan;
+            gain.connect(panner);
+            panner.connect(ctx.destination);
+          } else {
+            gain.connect(ctx.destination);
+          }
+          src.start(ctx.currentTime);
+          src.stop(ctx.currentTime + duration);
+        } catch(e) { console.warn('[aa-pop]', e); }
+      }
+    });
+
+    // ── Sky target — single global driver that stands in for an enemy bomber.
+    //    Emits a world-space position on window.__BLITZ_TARGET; toggles active
+    //    on a slow cycle. searchlight-sweep components read this when they
+    //    transition to the acquiring/tracking states. No mesh, no light —
+    //    just a parametric crossing path at ~500m altitude, ~90 m/s.         ─
+    AFRAME.registerComponent('sky-target', {
+      schema: {
+        altitude:     { default: 500 },   // metres
+        speed:        { default: 90 },    // m/s (Heinkel 111 cruise)
+        activeMin:    { default: 25 },    // seconds per crossing
+        activeMax:    { default: 40 },
+        inactiveMin:  { default: 15 },
+        inactiveMax:  { default: 35 }
+      },
+      init: function () {
+        this._state = 'inactive';
+        this._t = 0;
+        this._dur = this._rand(this.data.inactiveMin, this.data.inactiveMax);
+        this._startNewCrossing();
+        window.__BLITZ_TARGET = {
+          pos: new THREE.Vector3(0, this.data.altitude, 0),
+          active: false
+        };
+      },
+      _rand: function (a, b) { return a + Math.random() * (b - a); },
+      _startNewCrossing: function () {
+        // Pick a random horizontal crossing path across the scene.
+        // Origin line tangent (passes "over" origin), length ≈ speed*duration.
+        var headingDeg = Math.random() * 360;
+        var dur = this._rand(this.data.activeMin, this.data.activeMax);
+        var dist = this.data.speed * dur;
+        var rad = headingDeg * Math.PI / 180;
+        // Perpendicular offset so target doesn't always pass dead centre
+        var offset = (Math.random() - 0.5) * 300;
+        var dx = Math.cos(rad), dz = Math.sin(rad);
+        // Start/end points: walk back half dist along heading, end half forward
+        var px = -Math.sin(rad) * offset;
+        var pz =  Math.cos(rad) * offset;
+        this._start = new THREE.Vector3(px - dx * dist * 0.5, this.data.altitude, pz - dz * dist * 0.5);
+        this._end   = new THREE.Vector3(px + dx * dist * 0.5, this.data.altitude, pz + dz * dist * 0.5);
+        this._dur = dur;
+      },
+      tick: function (time, dt) {
+        var dts = Math.min(0.1, dt * 0.001);
+        this._t += dts;
+        var tgt = window.__BLITZ_TARGET;
+        if (this._state === 'inactive') {
+          tgt.active = false;
+          if (this._t >= this._dur) {
+            this._state = 'active';
+            this._t = 0;
+            this._startNewCrossing();
+          }
+        } else {
+          // active: lerp start → end over this._dur seconds
+          var u = Math.min(1, this._t / this._dur);
+          tgt.pos.lerpVectors(this._start, this._end, u);
+          tgt.active = true;
+          if (u >= 1) {
+            this._state = 'inactive';
+            this._t = 0;
+            this._dur = this._rand(this.data.inactiveMin, this.data.inactiveMax);
+          }
+        }
+      }
+    });
+
     // ── Searchlight sweep — procedural yaw/pitch driver for AA searchlights.
     //    Real Blitz searchlight crews hunted in organic sweeping patterns —
     //    not symmetric metronomes. Two sines mixed at irrational frequency
     //    ratio (phi, sqrt(2)) give a non-repeating wander. Occasional pauses
-    //    (hold) mimic operators briefly locking on a suspected contact. ────
+    //    (hold) mimic operators briefly locking on a suspected contact.
+    //    When a sky-target is active, lights in a groupId may acquire the
+    //    target together ("coning"), track it for ~8-15s, then return to
+    //    hunt. This is the climactic moment in Blitz footage.              ──
+    // Shared group bookkeeping for coning. When a light in a group acquires,
+    // it stamps the group with the target snapshot + a time window during
+    // which other members have elevated acquire chance (staggered cone-on).
+    window.__BLITZ_SL_GROUPS = window.__BLITZ_SL_GROUPS || {};
+
     AFRAME.registerComponent('searchlight-sweep', {
       schema: {
-        yawAmp:       { default: 40 },
-        yawCenter:    { default: 0 },
-        yawSpeed:     { default: 0.08 },
-        pitchAmp:     { default: 10 },
-        pitchCenter:  { default: -5 }, // tiny forward lean; cone geom already aims +Y
-        pitchSpeed:   { default: 0.13 },
-        phase:        { default: 0 },
-        holdChance:   { default: 0.004 }
+        yawAmp:        { default: 40 },
+        yawCenter:     { default: 0 },
+        yawSpeed:      { default: 0.035 },   // halved: lazier hunt
+        pitchAmp:      { default: 10 },
+        pitchCenter:   { default: -5 },      // tiny forward lean; cone geom already aims +Y
+        pitchSpeed:    { default: 0.065 },   // halved
+        phase:         { default: 0 },
+        holdChance:    { default: 0.002 },
+        groupId:       { default: '' },      // empty = solo, no coning
+        acquireChance: { default: 0.0025 }   // per-tick chance to lock (when target active)
       },
       init: function () {
         this._t = this.data.phase * 50 + Math.random() * 20;
         this._hold = 0;
+        this._state = 'hunt';                // hunt | acquiring | tracking | losing
+        this._stateT = 0;
+        this._stateDur = 0;
+        this._lerpFromYaw = 0; this._lerpFromPitch = 0;
+        this._tmpVec = new THREE.Vector3();
+        this._worldPos = new THREE.Vector3();
+        // Use YXZ rotation order so that yaw (Y) actually swings the cone's
+        // +Y aim horizontally. With default XYZ, Ry has no effect on the
+        // +Y axis — yaw would only spin the cone about its own centreline.
+        this.el.object3D.rotation.order = 'YXZ';
       },
-      tick: function (time, dt) {
-        var dtS = Math.min(0.05, dt * 0.001);
-        if (this._hold > 0) { this._hold -= dtS; return; }
-        if (Math.random() < this.data.holdChance) {
-          this._hold = 0.4 + Math.random() * 1.6;
-        }
-        this._t += dtS;
+      _setState: function (next, dur) {
+        this._state = next;
+        this._stateT = 0;
+        this._stateDur = dur;
+        this.el.emit('searchlight-state-changed', { state: next }, true);
+      },
+      _huntAngles: function () {
+        // Existing two-sine wobble. Separated out so we can drive it while
+        // also using its output as the "return home" target for losing state.
         var yT = this._t * this.data.yawSpeed;
         var pT = this._t * this.data.pitchSpeed;
         var yaw = this.data.yawCenter + this.data.yawAmp * (
@@ -705,7 +915,112 @@
           0.70 * Math.sin(pT * Math.PI * 2) +
           0.30 * Math.sin(pT * Math.PI * 2 * 2.41421)
         );
+        return { yaw: yaw, pitch: pitch };
+      },
+      _aimAt: function (worldTargetPos) {
+        // With rotation.order = 'YXZ', applying the sweep entity's rotation
+        // to its local +Y (the cone's axis) produces world direction:
+        //   d = ( sin θx · sin θy,  cos θx,  sin θx · cos θy )
+        // We want d to point from this entity toward worldTargetPos (expressed
+        // in the entity's parent frame since rotation acts in parent space).
+        this.el.object3D.parent.getWorldPosition(this._worldPos);
+        var localTgt = this._tmpVec.copy(worldTargetPos).sub(this._worldPos).normalize();
+        var dx = localTgt.x, dy = localTgt.y, dz = localTgt.z;
+        var horiz = Math.sqrt(dx*dx + dz*dz);
+        // Choose the sin θx < 0 branch so yaw stays near the intuitive value
+        // for forward targets (forward = yaw ≈ 0, pitch ≈ −asin(horiz)).
+        // That matches the existing "negative pitch = forward lean" convention.
+        var pitchDeg = -Math.asin(horiz) * 180 / Math.PI;  // ∈ [−90°, 0°]
+        // sin θx = -horiz, so: sin θy = dx / sin θx = -dx / horiz;
+        // cos θy = dz / sin θx = -dz / horiz.
+        var yawDeg = horiz > 1e-6
+          ? Math.atan2(-dx, -dz) * 180 / Math.PI
+          : this.data.yawCenter;
+        return { yaw: yawDeg, pitch: pitchDeg };
+      },
+      _tryAcquire: function () {
+        var tgt = window.__BLITZ_TARGET;
+        if (!tgt || !tgt.active) return false;
+        var gid = this.data.groupId;
+        var now = performance.now();
+        // Group coning: if another member in my group just acquired, I get a
+        // big acquire-chance boost for a short window.
+        var boost = 1;
+        if (gid) {
+          var g = window.__BLITZ_SL_GROUPS[gid];
+          if (g && now - g.stampMs < 1500 && g.sourceId !== this.el) {
+            boost = 140; // ~0.35 per-tick effective chance — usually fires within a few frames
+          }
+        }
+        if (Math.random() < this.data.acquireChance * boost) {
+          if (gid) {
+            window.__BLITZ_SL_GROUPS[gid] = { stampMs: now, sourceId: this.el };
+          }
+          // Begin acquiring
+          var cur = this._huntAngles();
+          this._lerpFromYaw = cur.yaw;
+          this._lerpFromPitch = cur.pitch;
+          this._setState('acquiring', 1.5);
+          return true;
+        }
+        return false;
+      },
+      tick: function (time, dt) {
+        var dtS = Math.min(0.05, dt * 0.001);
         var r = this.el.object3D.rotation;
+        var yaw, pitch;
+
+        if (this._state === 'hunt') {
+          if (this._hold > 0) { this._hold -= dtS; return; }
+          if (Math.random() < this.data.holdChance) {
+            this._hold = 1.5 + Math.random() * 2.5;
+          }
+          this._t += dtS;
+          var a = this._huntAngles();
+          yaw = a.yaw; pitch = a.pitch;
+          this._lastHuntYaw = yaw;
+          this._lastHuntPitch = pitch;
+          // Consider acquiring the sky target
+          this._tryAcquire();
+        } else if (this._state === 'acquiring') {
+          this._stateT += dtS;
+          var u = Math.min(1, this._stateT / this._stateDur);
+          var uE = u * u * (3 - 2 * u);
+          var aim = this._aimAt(window.__BLITZ_TARGET.pos);
+          // Wrap yaw delta into [-180, 180] so we take the short way around
+          var dyaw = ((aim.yaw - this._lerpFromYaw + 540) % 360) - 180;
+          yaw = this._lerpFromYaw + dyaw * uE;
+          pitch = this._lerpFromPitch + (aim.pitch - this._lerpFromPitch) * uE;
+          if (u >= 1) {
+            this._setState('tracking', 8 + Math.random() * 7);
+          }
+        } else if (this._state === 'tracking') {
+          this._stateT += dtS;
+          // Aim directly at target with small jitter
+          var aim2 = this._aimAt(window.__BLITZ_TARGET.pos);
+          var jitterY = Math.sin(time * 0.004 + this.data.phase * 17) * 0.9;
+          var jitterP = Math.sin(time * 0.0031 + this.data.phase * 31) * 0.6;
+          yaw = aim2.yaw + jitterY;
+          pitch = aim2.pitch + jitterP;
+          if (this._stateT >= this._stateDur || !window.__BLITZ_TARGET.active) {
+            this._lerpFromYaw = yaw;
+            this._lerpFromPitch = pitch;
+            this._setState('losing', 3);
+          }
+        } else if (this._state === 'losing') {
+          this._stateT += dtS;
+          var uL = Math.min(1, this._stateT / this._stateDur);
+          var uLE = uL * uL * (3 - 2 * uL);
+          this._t += dtS;
+          var huntA = this._huntAngles();
+          var dyawL = ((huntA.yaw - this._lerpFromYaw + 540) % 360) - 180;
+          yaw = this._lerpFromYaw + dyawL * uLE;
+          pitch = this._lerpFromPitch + (huntA.pitch - this._lerpFromPitch) * uLE;
+          if (uL >= 1) {
+            this._setState('hunt', 0);
+          }
+        }
+
         r.x = THREE.MathUtils.degToRad(pitch);
         r.y = THREE.MathUtils.degToRad(yaw);
         r.z = 0;
@@ -714,7 +1029,10 @@
 
     // ── Arc flicker — subtle ~20Hz opacity jitter mimicking carbon-arc
     //    unsteadiness. Much gentler than torch-flicker (±4% vs ±35%),
-    //    because arc lamps are intense but stable — not flame-like. ────────
+    //    because arc lamps are intense but stable — not flame-like.
+    //    Listens for searchlight-state-changed on the parent sweep entity:
+    //    while tracking, beam opacity is boosted (reads as "locked on") and
+    //    flicker amplitude is halved (locked beams appear steadier on film). ─
     AFRAME.registerComponent('arc-flicker', {
       schema: {
         base:      { default: 0.18 },
@@ -724,15 +1042,39 @@
       init: function () {
         this._t = Math.random() * 100;
         this._mesh = null;
+        this._lockMul = 1;      // current opacity multiplier (eased toward target)
+        this._lockTarget = 1;   // target multiplier: 1.35 tracking, 1.0 otherwise
+        this._ampMul = 1;
+        this._ampTarget = 1;
+        var self = this;
+        // Walk up to the nearest ancestor that fires searchlight-state-changed.
+        var p = this.el.parentNode;
+        while (p && p.emit && !p.components['searchlight-sweep']) p = p.parentNode;
+        this._sweepEl = p;
+        if (this._sweepEl && this._sweepEl.addEventListener) {
+          this._sweepEl.addEventListener('searchlight-state-changed', function (e) {
+            var s = e.detail && e.detail.state;
+            if (s === 'tracking') { self._lockTarget = 1.35; self._ampTarget = 0.5; }
+            else                  { self._lockTarget = 1.0;  self._ampTarget = 1.0; }
+          });
+        }
       },
       tick: function (time, dt) {
         if (!this._mesh) this._mesh = this.el.getObject3D('mesh');
         if (!this._mesh || !this._mesh.material) return;
-        this._t += dt * 0.001 * this.data.speed;
+        var dts = dt * 0.001;
+        // Smooth ease toward target over ~200ms
+        var k = Math.min(1, dts / 0.2);
+        this._lockMul += (this._lockTarget - this._lockMul) * k;
+        this._ampMul  += (this._ampTarget  - this._ampMul)  * k;
+        this._t += dts * this.data.speed;
         var j = 0.68 * Math.sin(this._t) +
                 0.22 * Math.sin(this._t * 3.17) +
                 0.10 * (Math.random() - 0.5) * 2;
-        this._mesh.material.opacity = Math.max(0, this.data.base + this.data.amplitude * j);
+        this._mesh.material.opacity = Math.max(
+          0,
+          this.data.base * this._lockMul + this.data.amplitude * this._ampMul * j
+        );
       }
     });
 
@@ -763,6 +1105,7 @@
   draco-loader
   raycaster-warmup
   distant-explosions
+  sky-target
   fog="type: linear; color: #070c18; near: 8; far: 32"
   renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.28"
   background="color: #070c18"
@@ -871,7 +1214,7 @@
       <a-sphere radius="0.55" no-fog
         material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
       <!-- Beam assembly — pivots around base, sweep driver rotates this -->
-      <a-entity searchlight-sweep="yawCenter: -20; yawAmp: 45; yawSpeed: 0.07; pitchCenter: -8; pitchAmp: 10; pitchSpeed: 0.11; phase: 0.13">
+      <a-entity searchlight-sweep="yawCenter: -20; yawAmp: 45; yawSpeed: 0.035; pitchCenter: -8; pitchAmp: 16; pitchSpeed: 0.055; phase: 0.13; groupId: A">
         <!-- hot core: radiusBottom 0.3 → radiusTop 1.8 over 260m ≈ 0.3° half-angle -->
         <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.8; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
@@ -896,7 +1239,7 @@
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
         material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: 8; yawAmp: 30; yawSpeed: 0.09; pitchCenter: -3; pitchAmp: 7; pitchSpeed: 0.18; phase: 0.41">
+      <a-entity searchlight-sweep="yawCenter: 8; yawAmp: 30; yawSpeed: 0.045; pitchCenter: -3; pitchAmp: 14; pitchSpeed: 0.09; phase: 0.41; groupId: A">
         <a-entity geometry="primitive:cone; height:260; radiusBottom:0.28; radiusTop:1.6; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 130 0"
@@ -918,7 +1261,7 @@
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
         material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: 25; yawAmp: 35; yawSpeed: 0.06; pitchCenter: -6; pitchAmp: 11; pitchSpeed: 0.13; phase: 0.76">
+      <a-entity searchlight-sweep="yawCenter: 25; yawAmp: 35; yawSpeed: 0.03; pitchCenter: -6; pitchAmp: 18; pitchSpeed: 0.065; phase: 0.76; groupId: B">
         <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.9; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 130 0"
@@ -940,7 +1283,7 @@
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
       <a-sphere radius="0.55" no-fog
         material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: 180; yawAmp: 40; yawSpeed: 0.075; pitchCenter: -4; pitchAmp: 9; pitchSpeed: 0.16; phase: 0.28">
+      <a-entity searchlight-sweep="yawCenter: 180; yawAmp: 40; yawSpeed: 0.038; pitchCenter: -4; pitchAmp: 15; pitchSpeed: 0.08; phase: 0.28; groupId: B">
         <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.7; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 130 0"
@@ -961,7 +1304,7 @@
     <a-entity position="-95 15 -140">
       <a-sphere radius="0.3" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: 30; yawAmp: 55; yawSpeed: 0.05; pitchCenter: -12; pitchAmp: 12; pitchSpeed: 0.09; phase: 0.55">
+      <a-entity searchlight-sweep="yawCenter: 30; yawAmp: 55; yawSpeed: 0.025; pitchCenter: -12; pitchAmp: 12; pitchSpeed: 0.045; phase: 0.55">
         <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.5; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 170 0"
@@ -977,7 +1320,7 @@
     <a-entity position="10 12 -180">
       <a-sphere radius="0.3" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: -10; yawAmp: 50; yawSpeed: 0.06; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.12; phase: 0.09">
+      <a-entity searchlight-sweep="yawCenter: -10; yawAmp: 50; yawSpeed: 0.03; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.06; phase: 0.09">
         <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.8; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 170 0"
@@ -993,7 +1336,7 @@
     <a-entity position="110 13 -150">
       <a-sphere radius="0.3" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: -30; yawAmp: 55; yawSpeed: 0.055; pitchCenter: -12; pitchAmp: 11; pitchSpeed: 0.10; phase: 0.83">
+      <a-entity searchlight-sweep="yawCenter: -30; yawAmp: 55; yawSpeed: 0.028; pitchCenter: -12; pitchAmp: 11; pitchSpeed: 0.05; phase: 0.83">
         <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.5; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 170 0"
@@ -1009,7 +1352,7 @@
     <a-entity position="-140 12 -40">
       <a-sphere radius="0.3" no-fog
         material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
-      <a-entity searchlight-sweep="yawCenter: 60; yawAmp: 50; yawSpeed: 0.065; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.11; phase: 0.34">
+      <a-entity searchlight-sweep="yawCenter: 60; yawAmp: 50; yawSpeed: 0.033; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.055; phase: 0.34">
         <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.6; segmentsRadial:32; openEnded:true"
           material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
           no-fog position="0 170 0"
@@ -1081,7 +1424,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v58</div>
+<div id="version-overlay">v59</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
