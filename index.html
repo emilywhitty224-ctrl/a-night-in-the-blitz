@@ -668,6 +668,74 @@
       }
     });
 
+    // ── Searchlight sweep — procedural yaw/pitch driver for AA searchlights.
+    //    Real Blitz searchlight crews hunted in organic sweeping patterns —
+    //    not symmetric metronomes. Two sines mixed at irrational frequency
+    //    ratio (phi, sqrt(2)) give a non-repeating wander. Occasional pauses
+    //    (hold) mimic operators briefly locking on a suspected contact. ────
+    AFRAME.registerComponent('searchlight-sweep', {
+      schema: {
+        yawAmp:       { default: 40 },
+        yawCenter:    { default: 0 },
+        yawSpeed:     { default: 0.08 },
+        pitchAmp:     { default: 10 },
+        pitchCenter:  { default: -5 }, // tiny forward lean; cone geom already aims +Y
+        pitchSpeed:   { default: 0.13 },
+        phase:        { default: 0 },
+        holdChance:   { default: 0.004 }
+      },
+      init: function () {
+        this._t = this.data.phase * 50 + Math.random() * 20;
+        this._hold = 0;
+      },
+      tick: function (time, dt) {
+        var dtS = Math.min(0.05, dt * 0.001);
+        if (this._hold > 0) { this._hold -= dtS; return; }
+        if (Math.random() < this.data.holdChance) {
+          this._hold = 0.4 + Math.random() * 1.6;
+        }
+        this._t += dtS;
+        var yT = this._t * this.data.yawSpeed;
+        var pT = this._t * this.data.pitchSpeed;
+        var yaw = this.data.yawCenter + this.data.yawAmp * (
+          0.62 * Math.sin(yT * Math.PI * 2) +
+          0.38 * Math.sin(yT * Math.PI * 2 * 1.61803)
+        );
+        var pitch = this.data.pitchCenter + this.data.pitchAmp * (
+          0.70 * Math.sin(pT * Math.PI * 2) +
+          0.30 * Math.sin(pT * Math.PI * 2 * 2.41421)
+        );
+        var r = this.el.object3D.rotation;
+        r.x = THREE.MathUtils.degToRad(pitch);
+        r.y = THREE.MathUtils.degToRad(yaw);
+        r.z = 0;
+      }
+    });
+
+    // ── Arc flicker — subtle ~20Hz opacity jitter mimicking carbon-arc
+    //    unsteadiness. Much gentler than torch-flicker (±4% vs ±35%),
+    //    because arc lamps are intense but stable — not flame-like. ────────
+    AFRAME.registerComponent('arc-flicker', {
+      schema: {
+        base:      { default: 0.18 },
+        amplitude: { default: 0.04 },
+        speed:     { default: 22 }
+      },
+      init: function () {
+        this._t = Math.random() * 100;
+        this._mesh = null;
+      },
+      tick: function (time, dt) {
+        if (!this._mesh) this._mesh = this.el.getObject3D('mesh');
+        if (!this._mesh || !this._mesh.material) return;
+        this._t += dt * 0.001 * this.data.speed;
+        var j = 0.68 * Math.sin(this._t) +
+                0.22 * Math.sin(this._t * 3.17) +
+                0.10 * (Math.random() - 0.5) * 2;
+        this._mesh.material.opacity = Math.max(0, this.data.base + this.data.amplitude * j);
+      }
+    });
+
     // ── Raycaster warm-up — first raycast into a big Draco scene is slow;
     //    do a dummy one on scene-loaded so the first real point doesn't freeze ──
     AFRAME.registerComponent('raycaster-warmup', {
@@ -774,123 +842,182 @@
        scene load (fetch → decodeAudioData), so when the torch raycaster first
        hits, playback starts instantly. Volume attenuates with distance in tick. -->
   <a-entity position="1.9018 1.0607 -15.302"
-    audio-trigger="src: blitz_audio_test.mp4; once: true; refDistance: 2; rolloffFactor: 2; volume: 1"
+    audio-trigger="src: blitz_audio_test.m4a; once: true; refDistance: 2; rolloffFactor: 2; volume: 1"
     geometry="primitive:sphere; radius:0.5"
     material="opacity:0; transparent:true; side:double">
   </a-entity>
 
-  <!-- ── Searchlights — 6 sweeping cone beams scattered around the scene,
-       each waving back & forward on its own rhythm. Cones pivot at their
-       base (position 0 110 0 lifts the 220m cone so the base sits at the
-       arc-lamp origin). Two layers: hot white inner + blue halo. Flat shader,
-       no actual spot lights (Quest 3-spot budget stays free). ─────────────── -->
+  <!-- ── Searchlights — 8 AA pencil beams (WWII 150cm carbon-arc lamps).
+       Real beams were narrow (~1° divergence), intense at the source, and
+       visible only via atmospheric scatter. Each light here is a 3-shell
+       tapered cone:
+         • hot core — nearly cylindrical, warm-white, high opacity, subtle flicker
+         • beam body — slightly wider, softer, flicker-linked
+         • outer haze — wider cool-blue atmospheric scatter, low opacity
+       At the base: an arc-lamp sphere (intense point) wrapped in a bloom
+       halo shell so it reads as a light source, not a grey ball.
+       Movement is procedural (searchlight-sweep component): two sines at
+       irrational freq ratio + occasional hold = organic, non-repeating
+       sweep that mimics operators hunting for aircraft.
+       No real point/spot lights — keeps Quest's 3-spot budget for the torch
+       and streetlamps. ─────────────────────────────────────────────────── -->
   <a-entity id="searchlights">
 
-    <!-- SL1 — far NW, wide slow sweep -->
-    <a-entity position="-28 9 -30"
-      animation="property:rotation; from:0 -55 0; to:0 55 0; dur:11000; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-20 0 0; to:10 0 0; dur:4200; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.08; to:0.13; dur:2600; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL1 — close NW, rooftop height, wide lazy sweep -->
+    <a-entity position="-22 8 -28">
+      <!-- Arc-lamp housing: bright core + halo + short glow ring -->
+      <a-sphere radius="0.22" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-sphere radius="0.55" no-fog
+        material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
+      <!-- Beam assembly — pivots around base, sweep driver rotates this -->
+      <a-entity searchlight-sweep="yawCenter: -20; yawAmp: 45; yawSpeed: 0.07; pitchCenter: -8; pitchAmp: 10; pitchSpeed: 0.11; phase: 0.13">
+        <!-- hot core: radiusBottom 0.3 → radiusTop 1.8 over 260m ≈ 0.3° half-angle -->
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.8; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.22; amplitude: 0.05; speed: 22"></a-entity>
+        <!-- beam body: softer, slightly wider -->
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.55; radiusTop:3.2; segmentsRadial:32; openEnded:true"
+          material="color:#f8eac0; opacity:0.12; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.12; amplitude: 0.03; speed: 17"></a-entity>
+        <!-- outer haze: wide cool scatter -->
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:1.2; radiusTop:6.5; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.06; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.06; amplitude: 0.02; speed: 12"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- SL2 — far N, shorter faster sweep -->
-    <a-entity position="4 8 -48"
-      animation="property:rotation; from:0 -35 0; to:0 40 0; dur:7500; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-8 0 0; to:14 0 0; dur:3300; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.13; to:0.21; dur:1900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#bbe0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.07; to:0.12; dur:3100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL2 — close N, tight pitched sweep -->
+    <a-entity position="6 9 -34">
+      <a-sphere radius="0.22" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-sphere radius="0.55" no-fog
+        material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: 8; yawAmp: 30; yawSpeed: 0.09; pitchCenter: -3; pitchAmp: 7; pitchSpeed: 0.18; phase: 0.41">
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.28; radiusTop:1.6; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.22; amplitude: 0.05; speed: 24"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.5; radiusTop:3.0; segmentsRadial:32; openEnded:true"
+          material="color:#f8eac0; opacity:0.12; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.12; amplitude: 0.03; speed: 19"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:1.1; radiusTop:6.0; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.06; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.06; amplitude: 0.02; speed: 14"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- SL3 — NE, narrow tight sweep -->
-    <a-entity position="30 8 -38"
-      animation="property:rotation; from:0 -45 0; to:0 25 0; dur:13000; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-12 0 0; to:6 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.0; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.12; to:0.2; dur:2400; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.06; to:0.11; dur:3300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL3 — close NE, slightly higher rooftop -->
+    <a-entity position="26 10 -32">
+      <a-sphere radius="0.22" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-sphere radius="0.55" no-fog
+        material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: 25; yawAmp: 35; yawSpeed: 0.06; pitchCenter: -6; pitchAmp: 11; pitchSpeed: 0.13; phase: 0.76">
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.9; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.22; amplitude: 0.05; speed: 20"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.55; radiusTop:3.4; segmentsRadial:32; openEnded:true"
+          material="color:#f8eac0; opacity:0.12; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.12; amplitude: 0.03; speed: 16"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:1.2; radiusTop:6.8; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.06; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.06; amplitude: 0.02; speed: 11"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- SL4 — behind player (S) -->
-    <a-entity position="-8 9 28"
-      animation="property:rotation; from:0 -30 0; to:0 50 0; dur:9500; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-15 0 0; to:5 0 0; dur:4700; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.3; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.13; to:0.21; dur:2000; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.8; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#a8d0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.07; to:0.12; dur:2800; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL4 — behind player (S), close -->
+    <a-entity position="-10 9 32">
+      <a-sphere radius="0.22" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-sphere radius="0.55" no-fog
+        material="shader:flat; color:#fff0bc; opacity:0.35; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: 180; yawAmp: 40; yawSpeed: 0.075; pitchCenter: -4; pitchAmp: 9; pitchSpeed: 0.16; phase: 0.28">
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.3; radiusTop:1.7; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.22; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.22; amplitude: 0.05; speed: 23"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:0.55; radiusTop:3.1; segmentsRadial:32; openEnded:true"
+          material="color:#f8eac0; opacity:0.12; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.12; amplitude: 0.03; speed: 18"></a-entity>
+        <a-entity geometry="primitive:cone; height:260; radiusBottom:1.2; radiusTop:6.2; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.06; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 130 0"
+          arc-flicker="base: 0.06; amplitude: 0.02; speed: 13"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- SL5 — far W -->
-    <a-entity position="-42 7 -8"
-      animation="property:rotation; from:0 -20 0; to:0 60 0; dur:10500; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-18 0 0; to:4 0 0; dur:3900; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.1; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.12; to:0.2; dur:2300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.2; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.06; to:0.11; dur:2900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL5 — distant NW (120m out), only beam visible above horizon.
+         Base arc lamp is invisibly small at this range; beam is what reads. -->
+    <a-entity position="-95 15 -140">
+      <a-sphere radius="0.3" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: 30; yawAmp: 55; yawSpeed: 0.05; pitchCenter: -12; pitchAmp: 12; pitchSpeed: 0.09; phase: 0.55">
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.5; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.20; amplitude: 0.04; speed: 19"></a-entity>
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:1.6; radiusTop:8; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.07; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.07; amplitude: 0.02; speed: 10"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- SL6 — far E, slow deep sweep -->
-    <a-entity position="38 8 2"
-      animation="property:rotation; from:0 -60 0; to:0 10 0; dur:14000; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-entity
-        animation="property:rotation; from:-10 0 0; to:12 0 0; dur:4500; dir:alternate; loop:true; easing:easeInOutSine">
-        <a-sphere radius="0.5" position="0 0.3 0" no-fog
-          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:32; openEnded:true"
-          material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:32; openEnded:true"
-          material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
-          no-fog position="0 110 0"
-          animation="property:material.opacity; from:0.08; to:0.13; dur:2700; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL6 — distant N -->
+    <a-entity position="10 12 -180">
+      <a-sphere radius="0.3" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: -10; yawAmp: 50; yawSpeed: 0.06; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.12; phase: 0.09">
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.8; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.20; amplitude: 0.04; speed: 21"></a-entity>
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:1.6; radiusTop:8; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.07; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.07; amplitude: 0.02; speed: 12"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL7 — distant NE -->
+    <a-entity position="110 13 -150">
+      <a-sphere radius="0.3" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: -30; yawAmp: 55; yawSpeed: 0.055; pitchCenter: -12; pitchAmp: 11; pitchSpeed: 0.10; phase: 0.83">
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.5; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.20; amplitude: 0.04; speed: 18"></a-entity>
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:1.6; radiusTop:7.5; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.07; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.07; amplitude: 0.02; speed: 11"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL8 — distant W -->
+    <a-entity position="-140 12 -40">
+      <a-sphere radius="0.3" no-fog
+        material="shader:flat; color:#fff6dc; fog:false"></a-sphere>
+      <a-entity searchlight-sweep="yawCenter: 60; yawAmp: 50; yawSpeed: 0.065; pitchCenter: -10; pitchAmp: 10; pitchSpeed: 0.11; phase: 0.34">
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:0.5; radiusTop:3.6; segmentsRadial:32; openEnded:true"
+          material="color:#fff4dc; opacity:0.20; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.20; amplitude: 0.04; speed: 20"></a-entity>
+        <a-entity geometry="primitive:cone; height:340; radiusBottom:1.6; radiusTop:8; segmentsRadial:24; openEnded:true"
+          material="color:#b8cbff; opacity:0.07; transparent:true; side:double; shader:flat; depthWrite:false; fog:false"
+          no-fog position="0 170 0"
+          arc-flicker="base: 0.07; amplitude: 0.02; speed: 13"></a-entity>
       </a-entity>
     </a-entity>
 
@@ -954,7 +1081,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v57</div>
+<div id="version-overlay">v58</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="

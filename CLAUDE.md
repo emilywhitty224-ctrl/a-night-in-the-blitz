@@ -4,7 +4,7 @@
 - `index.html` — the A-Frame scene (all components + markup live here)
 - `a_night_in_the_blitz_14.glb` — the current Blender export (replaced on re-export; bump the `<a-asset-item>` src if the filename changes)
 - `torch.glb` — the torch model held in the right hand
-- `blitz_audio_test.mp4` — positional radio audio
+- `blitz_audio_test.m4a` — positional radio audio (32 kbps mono AAC, ~213 KB)
 
 ## NEVER touch
 - Anything in `/Users/emilylilywhitty/Desktop/The royal oak/` — that is the OLD project folder
