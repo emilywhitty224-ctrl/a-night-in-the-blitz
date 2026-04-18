@@ -80,6 +80,16 @@
                 }
               });
 
+              // Smooth shading — average normals at shared indices so
+              // curved surfaces stop reading as faceted polygons.
+              if (node.geometry && node.geometry.attributes && node.geometry.attributes.position) {
+                try { node.geometry.computeVertexNormals(); } catch(e) {}
+                var mats2 = Array.isArray(node.material) ? node.material : [node.material];
+                mats2.forEach(function (m) {
+                  if (m) { m.flatShading = false; m.needsUpdate = true; }
+                });
+              }
+
               // Wet-cobble look — meshes whose world-Y top is below ~0.5m
               // get lowered roughness + a touch of metalness so puddled ground
               // picks up torch + streetlamp reflections.
@@ -212,29 +222,34 @@
       }
     });
 
-    // ── Torch raycaster — A-Frame built-in raycaster (fast), wall-check only on hit ──
+    // ── Torch raycaster — A-Frame built-in raycaster (fast), wall-check only on hit.
+    //    Caches a flat mesh list from the scene GLB at load, so per-ray
+    //    intersections skip the hierarchical traversal (big Draco scenes freeze
+    //    the main thread otherwise — that was the torch-at-radio hitch). ──────
     AFRAME.registerComponent('torch-raycaster', {
       init: function () {
         this._rc = new THREE.Raycaster();
         this._rc.far = 15;
-        this._sceneObj = null;
+        this._sceneMeshes = null;
         var self = this;
         var sceneEl = document.querySelector('[gltf-model="#scene-glb"]');
         if (sceneEl) {
           sceneEl.addEventListener('model-loaded', function () {
-            self._sceneObj = sceneEl.object3D;
+            var meshes = [];
+            sceneEl.object3D.traverse(function (n) { if (n.isMesh) meshes.push(n); });
+            self._sceneMeshes = meshes;
           });
         }
         this.el.setAttribute('raycaster', 'direction: 0 1 0; near: 0; far: 15; objects: [audio-trigger]');
         this.el.addEventListener('raycaster-intersection', function (e) {
           e.detail.els.forEach(function (triggerEl) {
-            if (self._sceneObj) {
+            if (self._sceneMeshes && self._sceneMeshes.length) {
               var pos = new THREE.Vector3();
               var dir = new THREE.Vector3(0, 1, 0);
               self.el.object3D.getWorldPosition(pos);
               dir.transformDirection(self.el.object3D.matrixWorld).normalize();
               self._rc.set(pos, dir);
-              var wallHits = self._rc.intersectObject(self._sceneObj, true);
+              var wallHits = self._rc.intersectObjects(self._sceneMeshes, false);
               var wallDist = wallHits.length ? wallHits[0].distance : Infinity;
               var triggerHits = self._rc.intersectObject(triggerEl.object3D, true);
               if (!triggerHits.length || triggerHits[0].distance >= wallDist) return;
@@ -330,31 +345,6 @@
         var evs = ['abuttondown','bbuttondown','xbuttondown','ybuttondown','triggerdown','gripdown','thumbstickdown'];
         var self = this;
         evs.forEach(function (e) { self.el.addEventListener(e, _unlockAudio); });
-      }
-    });
-
-    // ── Breath condensation — faint cloudy puff expanding from camera,
-    //    pulses every 4.5s. Low-opacity sphere, only reads against the dark.
-    AFRAME.registerComponent('breath-puff', {
-      init: function () {
-        this._t = Math.random() * 3;
-        this._period = 4.5;
-        this._duration = 1.4;
-        this._mesh = null;
-      },
-      tick: function (t, dt) {
-        if (!this._mesh) this._mesh = this.el.getObject3D('mesh');
-        if (!this._mesh || !this._mesh.material) return;
-        this._t += dt * 0.001;
-        var cycle = this._t % this._period;
-        if (cycle < this._duration) {
-          var p = cycle / this._duration;
-          this._mesh.material.opacity = Math.sin(p * Math.PI) * 0.22;
-          var s = 0.4 + p * 1.8;
-          this.el.object3D.scale.set(s, s, s);
-        } else if (this._mesh.material.opacity !== 0) {
-          this._mesh.material.opacity = 0;
-        }
       }
     });
 
@@ -546,71 +536,6 @@
       }
     });
 
-    // ── Torch pickup — on load, in-hand torch is hidden and #scene-torch lies
-    //    on the ground. On grip-down within 0.25m of #scene-torch, swap:
-    //    hide the floor torch, show the in-hand one, fire haptic, fade hint. ──
-    AFRAME.registerComponent('torch-pickup', {
-      init: function () {
-        this._pickedUp = false;
-        this._sceneTorch = null;
-        this._torch = null;
-        this._hint = null;
-        var self = this;
-        // Components init before children/siblings attach their models, so
-        // defer the initial visibility flip to the first tick.
-        this._needsHideTorch = true;
-        this.el.addEventListener('gripdown', function () { self._tryPickup(); });
-      },
-      _resolve: function () {
-        if (!this._sceneTorch) this._sceneTorch = document.getElementById('scene-torch');
-        if (!this._torch) this._torch = document.getElementById('torch');
-        if (!this._hint) this._hint = document.getElementById('pickup-hint');
-      },
-      _tryPickup: function () {
-        if (this._pickedUp) return;
-        this._resolve();
-        if (!this._sceneTorch || !this._torch) return;
-        var handPos = new THREE.Vector3();
-        var torchPos = new THREE.Vector3();
-        this.el.object3D.getWorldPosition(handPos);
-        this._sceneTorch.object3D.getWorldPosition(torchPos);
-        if (handPos.distanceTo(torchPos) >= 0.25) return;
-        this._pickedUp = true;
-        this._sceneTorch.setAttribute('visible', false);
-        this._torch.setAttribute('visible', true);
-        if (this._hint) {
-          var hint = this._hint;
-          var textObj = hint.getObject3D('text');
-          if (textObj && textObj.material) {
-            textObj.material.transparent = true;
-            var start = performance.now();
-            var fade = function () {
-              var k = Math.min(1, (performance.now() - start) / 500);
-              textObj.material.opacity = 1 - k;
-              if (k < 1) requestAnimationFrame(fade);
-              else hint.setAttribute('visible', false);
-            };
-            fade();
-          } else {
-            setTimeout(function () { hint.setAttribute('visible', false); }, 500);
-          }
-        }
-        var gp = this.el.components['oculus-touch-controls'];
-        if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
-          gp.controller.hapticActuators[0].pulse(0.7, 120);
-        }
-      },
-      tick: function () {
-        if (this._needsHideTorch) {
-          this._resolve();
-          if (this._torch) {
-            this._torch.setAttribute('visible', false);
-            this._needsHideTorch = false;
-          }
-        }
-      }
-    });
-
     // ── Raycaster warm-up — first raycast into a big Draco scene is slow;
     //    do a dummy one on scene-loaded so the first real point doesn't freeze ──
     AFRAME.registerComponent('raycaster-warmup', {
@@ -638,135 +563,215 @@
   draco-loader
   raycaster-warmup
   distant-explosions
-  fog="type: linear; color: #010306; near: 4; far: 18"
-  renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.06"
-  background="color: #010306"
+  fog="type: linear; color: #050912; near: 6; far: 24"
+  renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.18"
+  background="color: #050912"
   vr-mode-ui="enabled: true"
   loading-screen="dotsColor: #ffee88; backgroundColor: #000">
 
   <a-assets timeout="300000">
     <a-asset-item id="scene-glb" src="a_night_in_the_blitz_14.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
+    <!-- Preload audio so the first torch-on-radio hit doesn't stall decoding -->
+    <audio id="blitz-audio" src="blitz_audio_test.mp4" preload="auto" crossorigin="anonymous"></audio>
   </a-assets>
 
   <!-- Scene -->
   <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1" night-darken></a-entity>
 
-<!-- Torch resting on floor at spawn — user picks it up with right grip -->
-  <a-entity id="scene-torch" gltf-model="#torch-glb"
-    position="0.3 0.04 -0.5"
-    rotation="0 45 90"
-    scale="0.075 0.075 0.075"
-    matte-darken></a-entity>
+  <!-- Sky — dark blue night, moonlit rather than pitch black -->
+  <a-sky color="#050912"></a-sky>
 
-  <!-- Pickup hint — floats above the floor torch, hidden on pickup -->
-  <a-entity id="pickup-hint" position="0.3 0.35 -0.5" rotation="-35 0 0"
-    text="value: Pick up the torch (grip); align:center; color:#ffddaa; width:0.7; side:double"></a-entity>
-
-  <!-- Sky — solid blackout dark, no horizon texture to break immersion -->
-  <a-sky color="#010306"></a-sky>
+  <!-- Moon — soft disc visible in the sky for reference -->
+  <a-entity position="22 32 -40" no-fog>
+    <a-circle radius="1.6" rotation="0 210 0"
+      material="shader:flat; color:#f4f0dc; opacity:0.95; transparent:true; fog:false"></a-circle>
+    <a-circle radius="2.6" rotation="0 210 0"
+      material="shader:flat; color:#c8d4ff; opacity:0.18; transparent:true; fog:false"></a-circle>
+  </a-entity>
 
   <!-- ── Barrage Balloons — silver blimps ~28–50m overhead, slow drift ── -->
   <!-- Moonlight (directional from position 4 10 6) glistens off metalness  -->
-  <a-entity id="balloon-1" position="3 28 -18" no-fog
-    animation="property:position; from:3 28 -18; to:3 30 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-1" position="3 15 -18" no-fog
+    animation="property:position; from:3 15 -18; to:3 16.2 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -4; to:0 25 4; dur:38000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.2 1 1.1" radius="1"
       material="shader:standard; color:#b0bcc8; metalness:0.65; roughness:0.22; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="28" color="#666" position="0 -14 0"
+    <a-cylinder radius="0.018" height="15" color="#666" position="0 -7.5 0"
       material="color:#777; opacity:0.35; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-2" position="-2 40 -28" no-fog
-    animation="property:position; from:-2 40 -28; to:-2 43 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-2" position="-2 20 -28" no-fog
+    animation="property:position; from:-2 20 -28; to:-2 21.5 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 3; to:0 -30 -3; dur:44000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.4 1 1.15" radius="1"
       material="shader:standard; color:#aab8c4; metalness:0.65; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="40" color="#666" position="0 -20 0"
+    <a-cylinder radius="0.018" height="20" color="#666" position="0 -10 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-3" position="11 35 -22" no-fog
-    animation="property:position; from:11 35 -22; to:11 38 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-3" position="11 17 -22" no-fog
+    animation="property:position; from:11 17 -22; to:11 18.5 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -6; to:0 20 5; dur:32000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
       material="shader:standard; color:#b4c0cc; metalness:0.68; roughness:0.2; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="35" color="#666" position="0 -17.5 0"
+    <a-cylinder radius="0.018" height="17" color="#666" position="0 -8.5 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <a-entity id="balloon-4" position="18 50 -12" no-fog
-    animation="property:position; from:18 50 -12; to:18 53 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-4" position="18 22 -12" no-fog
+    animation="property:position; from:18 22 -12; to:18 23.5 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 4; to:0 -18 -4; dur:50000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.1 1 1.05" radius="1"
       material="shader:standard; color:#b8c4d0; metalness:0.62; roughness:0.24; emissive:#8899aa; emissiveIntensity:0.8; side:double"></a-sphere>
   </a-entity>
 
-  <a-entity id="balloon-5" position="-6 32 -10" no-fog
-    animation="property:position; from:-6 32 -10; to:-6 34 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
+  <a-entity id="balloon-5" position="-6 16 -10" no-fog
+    animation="property:position; from:-6 16 -10; to:-6 17.2 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
     <a-sphere scale="3.3 1 1.1" radius="1"
       material="shader:standard; color:#acbac6; metalness:0.67; roughness:0.21; emissive:#8899aa; emissiveIntensity:0.85; side:double"></a-sphere>
-    <a-cylinder radius="0.018" height="32" color="#666" position="0 -16 0"
+    <a-cylinder radius="0.018" height="16" color="#666" position="0 -8 0"
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
   <!-- ── Audio trigger — positional radio, louder as you approach ────────── -->
-  <!-- sound component with positional:true routes playback through a PannerNode -->
+  <!-- sound component with positional:true routes playback through a PannerNode.
+       src references the preloaded #blitz-audio asset so first play doesn't stall. -->
   <a-entity position="1.9018 1.0607 -15.302" audio-trigger="once: true"
-    sound="src: url(blitz_audio_test.mp4); positional: true; distanceModel: inverse; refDistance: 2; rolloffFactor: 2; volume: 1; autoplay: false; loop: false"
+    sound="src: #blitz-audio; positional: true; distanceModel: inverse; refDistance: 2; rolloffFactor: 2; volume: 1; autoplay: false; loop: false"
     geometry="primitive:sphere; radius:0.5"
     material="opacity:0; transparent:true; side:double">
   </a-entity>
 
-  <!-- Searchlights — sweeping cone beams from rooftop level.
-       Two-layer cone (hot inner core + softer outer halo) + emissive "arc lamp"
-       at the base, on a pulsing opacity animation for carbon-arc shimmer.
-       Flat shader only — no actual spot lights (Quest 3-spot budget stays free). -->
-  <a-entity position="-10 12 -35"
-    animation="property:rotation; from:0 -50 0; to:0 50 0; dur:9000; dir:alternate; loop:true; easing:easeInOutSine">
-    <a-entity
-      animation="property:rotation; from:-8 0 0; to:6 0 0; dur:3700; dir:alternate; loop:true; easing:easeInOutSine">
-      <!-- Arc-lamp housing — bright point the beam emanates from -->
-      <a-sphere radius="0.55" position="0 0.3 0" no-fog
-        material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-      <!-- Inner hot core — narrow, brighter, whiter -->
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.12; segmentsRadial:8"
-        material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"
-        animation="property:material.opacity; from:0.13; to:0.20; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-      <!-- Outer halo — wider, coloured, softer -->
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:8"
-        material="color:#a8d0ff; opacity:0.10; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"
-        animation="property:material.opacity; from:0.08; to:0.13; dur:2600; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-    </a-entity>
-  </a-entity>
+  <!-- ── Searchlights — 6 sweeping cone beams scattered around the scene,
+       each waving back & forward on its own rhythm. Cones pivot at their
+       base (position 0 110 0 lifts the 220m cone so the base sits at the
+       arc-lamp origin). Two layers: hot white inner + blue halo. Flat shader,
+       no actual spot lights (Quest 3-spot budget stays free). ─────────────── -->
+  <a-entity id="searchlights">
 
-  <a-entity position="20 8 -42"
-    animation="property:rotation; from:0 -55 0; to:0 20 0; dur:13000; dir:alternate; loop:true; easing:easeInOutSine">
-    <a-entity
-      animation="property:rotation; from:-5 0 0; to:8 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
-      <a-sphere radius="0.5" position="0 0.3 0" no-fog
-        material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.12; segmentsRadial:8"
-        material="color:#ffffff; opacity:0.15; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"
-        animation="property:material.opacity; from:0.12; to:0.19; dur:1900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-      <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:8"
-        material="color:#bbe0ff; opacity:0.09; transparent:true; side:double; shader:flat"
-        no-fog position="0 110 0"
-        animation="property:material.opacity; from:0.07; to:0.12; dur:3100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+    <!-- SL1 — far NW, wide slow sweep -->
+    <a-entity position="-28 9 -30"
+      animation="property:rotation; from:0 -55 0; to:0 55 0; dur:11000; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-20 0 0; to:10 0 0; dur:4200; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.08; to:0.13; dur:2600; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
     </a-entity>
+
+    <!-- SL2 — far N, shorter faster sweep -->
+    <a-entity position="4 8 -48"
+      animation="property:rotation; from:0 -35 0; to:0 40 0; dur:7500; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-8 0 0; to:14 0 0; dur:3300; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.13; to:0.21; dur:1900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#bbe0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.07; to:0.12; dur:3100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL3 — NE, narrow tight sweep -->
+    <a-entity position="30 8 -38"
+      animation="property:rotation; from:0 -45 0; to:0 25 0; dur:13000; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-12 0 0; to:6 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.0; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.12; to:0.2; dur:2400; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.06; to:0.11; dur:3300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL4 — behind player (S) -->
+    <a-entity position="-8 9 28"
+      animation="property:rotation; from:0 -30 0; to:0 50 0; dur:9500; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-15 0 0; to:5 0 0; dur:4700; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.3; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.13; to:0.21; dur:2000; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.8; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#a8d0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.07; to:0.12; dur:2800; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL5 — far W -->
+    <a-entity position="-42 7 -8"
+      animation="property:rotation; from:0 -20 0; to:0 60 0; dur:10500; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-18 0 0; to:4 0 0; dur:3900; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.1; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.12; to:0.2; dur:2300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.2; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.06; to:0.11; dur:2900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- SL6 — far E, slow deep sweep -->
+    <a-entity position="38 8 2"
+      animation="property:rotation; from:0 -60 0; to:0 10 0; dur:14000; dir:alternate; loop:true; easing:easeInOutSine">
+      <a-entity
+        animation="property:rotation; from:-10 0 0; to:12 0 0; dur:4500; dir:alternate; loop:true; easing:easeInOutSine">
+        <a-sphere radius="0.5" position="0 0.3 0" no-fog
+          material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+          material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+          material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
+          no-fog position="0 110 0"
+          animation="property:material.opacity; from:0.08; to:0.13; dur:2700; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
+      </a-entity>
+    </a-entity>
+
   </a-entity>
 
   <!-- Lighting -->
-  <a-light id="scene-ambient" type="ambient" color="#0a0f1a" intensity="0.12"></a-light>
+  <a-light id="scene-ambient" type="ambient" color="#1a2438" intensity="0.28"></a-light>
   <!-- Sun — off by default, switched on by day mode panel -->
   <a-light id="sun-light" type="directional" color="#fff8e8" intensity="0" position="-3 10 5"></a-light>
-  <!-- Moonlight — gentle cool blue-white directional from high right behind player -->
-  <a-light type="directional" color="#c8d8ff" intensity="0.04"
-           position="4 10 6"></a-light>
+  <!-- Moonlight — cool blue-white directional from the moon's sky position
+       (22 32 -40), strong enough to silhouette rooftops and glint on cobbles -->
+  <a-light id="moon-light" type="directional" color="#c8d8ff" intensity="0.75"
+           position="22 32 -40"></a-light>
+  <!-- Sky-dome fill — hemisphere light adds a soft upward cool wash so
+       nothing sits in total black between the moon's direction and shadow side -->
+  <a-entity light="type: hemisphere; color: #8096c8; groundColor: #0a0e18; intensity: 0.35"></a-entity>
   <!-- Blackout lamp lights — spotlights pointing straight down, light only reaches ground -->
   <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
            position="3.32 3.07 -19.04" target="#lamp-target-1"></a-light>
@@ -785,18 +790,13 @@
          uncommenting the element below once the root cause is confirmed. -->
     <!-- <a-entity rain></a-entity> -->
 
-    <a-entity id="cam" camera look-controls position="0 1.6 0">
-      <!-- Breath condensation — faint puff, only visible against the dark -->
-      <a-entity breath-puff position="0 -0.06 -0.28"
-        geometry="primitive:sphere; radius:0.04; segmentsWidth:12; segmentsHeight:8"
-        material="color:#e8f0f8; opacity:0; transparent:true; depthWrite:false; fog:false"></a-entity>
-    </a-entity>
+    <a-entity id="cam" camera look-controls position="0 1.6 0"></a-entity>
 
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle brightness-cycle audio-unlock-vr torch-pickup>
-      <!-- Torch model — held in right hand, points forward (-Z) -->
+              torch-toggle brightness-cycle audio-unlock-vr>
+      <!-- Torch model — held in right hand from spawn, points forward (-Z) -->
       <!-- down 5cm (-0.07), back 10cm (+0.05 in controller Z = toward player) -->
       <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
         <!-- Moonlight bounce inside torch so it toggles off with it -->
@@ -821,7 +821,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v55</div>
+<div id="version-overlay">v56</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -905,16 +905,18 @@
 
   function setNight() {
     var scene = document.querySelector('a-scene');
-    _setExposure(0.06);
-    scene.setAttribute('fog', 'type:linear; color:#010306; near:4; far:18');
+    _setExposure(0.18);
+    scene.setAttribute('fog', 'type:linear; color:#050912; near:6; far:24');
     var ambient = document.getElementById('scene-ambient');
-    if (ambient) ambient.setAttribute('light', 'color:#0a0f1a; intensity:0.12');
+    if (ambient) ambient.setAttribute('light', 'color:#1a2438; intensity:0.28');
     var sun = document.getElementById('sun-light');
     if (sun) sun.setAttribute('light', 'intensity', 0);
+    var moon = document.getElementById('moon-light');
+    if (moon) moon.setAttribute('light', 'intensity', 0.75);
     var sky = document.querySelector('a-sky');
-    if (sky) sky.setAttribute('color', '#010306');
-    scene.setAttribute('background', 'color: #010306');
-    _applySceneColors(0.08, 0.08, 0.08);
+    if (sky) sky.setAttribute('color', '#050912');
+    scene.setAttribute('background', 'color: #050912');
+    _applySceneColors(0.2, 0.22, 0.28);
     _applyGroundPBR(0.55, 0.1); // wet cobbles
     document.getElementById('btn-night').style.borderColor = '#ffffff';
     document.getElementById('btn-day').style.borderColor = '#ffcc66';
