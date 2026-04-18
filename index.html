@@ -44,6 +44,74 @@
       return false;
     };
 
+    // ── Merge vertices by (position + UV) and rebuild index. Used by
+    //    night-darken to fix the faceted look from Blender's per-face split
+    //    normals. UV is included in the key so texture seams survive. ─────
+    function _mergeVertsByPosUV(geom) {
+      if (!geom || !geom.attributes || !geom.attributes.position) return geom;
+      // Bail on multi-material meshes (groups) — re-slicing groups after a
+      // remap is fiddly and not worth the risk for the shading gain.
+      if (geom.groups && geom.groups.length > 1) return geom;
+      var posAttr = geom.attributes.position;
+      var uvAttr = geom.attributes.uv;
+      var oldIndex = geom.index;
+      var triIndices = oldIndex ? oldIndex.array : null;
+      var triCount = oldIndex ? oldIndex.count : posAttr.count;
+      var n = posAttr.count;
+      var tol = 1e4; // quantize to 0.0001 m + 0.0001 uv
+      var hash = Object.create(null);
+      var remap = new Int32Array(n);
+      var kept = 0;
+      for (var i = 0; i < n; i++) {
+        var x = Math.round(posAttr.getX(i) * tol);
+        var y = Math.round(posAttr.getY(i) * tol);
+        var z = Math.round(posAttr.getZ(i) * tol);
+        var key = x + '_' + y + '_' + z;
+        if (uvAttr) {
+          var u = Math.round(uvAttr.getX(i) * tol);
+          var v = Math.round(uvAttr.getY(i) * tol);
+          key += '_' + u + '_' + v;
+        }
+        var slot = hash[key];
+        if (slot === undefined) {
+          hash[key] = kept;
+          remap[i] = kept;
+          kept++;
+        } else {
+          remap[i] = slot;
+        }
+      }
+      if (kept === n) return geom; // nothing to merge
+      var newGeom = new THREE.BufferGeometry();
+      var attribs = geom.attributes;
+      var seen = new Uint8Array(kept);
+      for (var name in attribs) {
+        var attr = attribs[name];
+        var itemSize = attr.itemSize;
+        var Ctor = attr.array.constructor;
+        var newArr = new Ctor(kept * itemSize);
+        for (var j = 0; j < n; j++) {
+          var dst = remap[j];
+          if (seen[dst]) continue; // first-writer wins (dupes have identical pos+uv)
+          seen[dst] = 1;
+          for (var k = 0; k < itemSize; k++) {
+            newArr[dst * itemSize + k] = attr.array[j * itemSize + k];
+          }
+        }
+        newGeom.setAttribute(name, new THREE.BufferAttribute(newArr, itemSize, attr.normalized));
+        seen.fill(0);
+      }
+      var IndexCtor = kept > 65535 ? Uint32Array : Uint16Array;
+      var newIdx = new IndexCtor(triCount);
+      if (triIndices) {
+        for (var t = 0; t < triCount; t++) newIdx[t] = remap[triIndices[t]];
+      } else {
+        for (var t = 0; t < triCount; t++) newIdx[t] = remap[t];
+      }
+      newGeom.setIndex(new THREE.BufferAttribute(newIdx, 1));
+      return newGeom;
+    }
+
     // ── Night darken — darkens baked GLB textures to blackout levels ─────
     AFRAME.registerComponent('night-darken', {
       init: function () {
@@ -66,7 +134,7 @@
                   if (node.geometry && !node.geometry.attributes.normal) node.geometry.computeVertexNormals();
                   var replacement = new THREE.MeshStandardMaterial({
                     map: mat.map,
-                    color: new THREE.Color(0.08, 0.08, 0.08),
+                    color: new THREE.Color(0.28, 0.3, 0.38),
                     roughness: 0.9, metalness: 0.0,
                     side: THREE.DoubleSide, transparent: mat.transparent,
                     opacity: mat.opacity, alphaTest: mat.alphaTest
@@ -75,15 +143,25 @@
                   if (Array.isArray(node.material)) { node.material[i] = replacement; }
                   else { node.material = replacement; }
                 } else {
-                  mat.color.setRGB(0.08, 0.08, 0.08);
+                  mat.color.setRGB(0.28, 0.3, 0.38);
                   mat.needsUpdate = true;
                 }
               });
 
-              // Smooth shading — average normals at shared indices so
-              // curved surfaces stop reading as faceted polygons.
+              // Smooth shading — merge duplicate vertices (same position +
+              // same UV so we don't break texture seams), rebuild the index,
+              // then computeVertexNormals averages across shared verts. This
+              // is what fixes the faceted-polygon look when Blender exports
+              // with split normals per face.
               if (node.geometry && node.geometry.attributes && node.geometry.attributes.position) {
-                try { node.geometry.computeVertexNormals(); } catch(e) {}
+                try {
+                  var merged = _mergeVertsByPosUV(node.geometry);
+                  if (merged && merged !== node.geometry) {
+                    node.geometry.dispose && node.geometry.dispose();
+                    node.geometry = merged;
+                  }
+                  node.geometry.computeVertexNormals();
+                } catch(e) { console.warn('[merge]', e); }
                 var mats2 = Array.isArray(node.material) ? node.material : [node.material];
                 mats2.forEach(function (m) {
                   if (m) { m.flatShading = false; m.needsUpdate = true; }
@@ -261,25 +339,79 @@
       }
     });
 
-    // ── Audio trigger — delegates playback to A-Frame's sound component.
-    //    The sound component is configured with positional:true on the
-    //    entity, so the playback is spatialised automatically.
+    // ── Positional audio trigger — pre-decodes the audio file into an
+    //    AudioBuffer at scene load so playback on trigger is instant.
+    //    A-Frame's sound component decodes lazily on first play, which is
+    //    what caused the 30-second delay + frame freeze when the torch
+    //    first swept across the radio. Distance attenuation is a simple
+    //    inverse model computed per tick against the camera position. ─────
     AFRAME.registerComponent('audio-trigger', {
-      schema: { once: { type: 'boolean', default: true } },
-      init: function () { this._played = false; },
+      schema: {
+        src: { type: 'string' },
+        once: { type: 'boolean', default: true },
+        refDistance: { default: 2 },
+        rolloffFactor: { default: 2 },
+        maxDistance: { default: 40 },
+        volume: { default: 1 }
+      },
+      init: function () {
+        this._buffer = null;
+        this._played = false;
+        this._source = null;
+        this._gain = null;
+        var self = this;
+        // Kick off fetch + decode immediately. The decode can start before the
+        // scene GLB finishes downloading, so the buffer is usually ready well
+        // before the user's torch reaches the radio.
+        fetch(this.data.src)
+          .then(function (r) { return r.arrayBuffer(); })
+          .then(function (ab) {
+            var ctx = AFRAME.THREE.AudioContext.getContext();
+            return new Promise(function (resolve, reject) {
+              ctx.decodeAudioData(ab, resolve, reject);
+            });
+          })
+          .then(function (buf) {
+            self._buffer = buf;
+            console.log('[audio-trigger] buffer ready:', buf.duration.toFixed(1) + 's');
+          })
+          .catch(function (e) { console.warn('[audio-trigger] decode failed:', e); });
+      },
       triggerPlay: function () {
         if (this.data.once && this._played) return;
-        var sound = this.el.components.sound;
-        if (!sound) return;
-        var pool = sound.pool;
-        if (!pool || !pool.children.length) return;
-        var audio = pool.children[0];
-        if (!audio || !audio.buffer) return; // buffer still loading — retry on next raycast
+        if (!this._buffer) { return; }
+        var ctx = AFRAME.THREE.AudioContext.getContext();
+        if (ctx.state === 'suspended') { try { ctx.resume(); } catch(e) {} }
         try {
-          sound.stopSound();
-          sound.playSound();
+          var src = ctx.createBufferSource();
+          src.buffer = this._buffer;
+          var gain = ctx.createGain();
+          gain.gain.value = 0;
+          src.connect(gain);
+          gain.connect(ctx.destination);
+          src.start(0);
+          this._source = src;
+          this._gain = gain;
           this._played = true;
-        } catch(e) { console.warn('[audio-trigger]', e); }
+        } catch(e) { console.warn('[audio-trigger] play failed:', e); }
+      },
+      tick: function () {
+        if (!this._gain) return;
+        var cam = document.getElementById('cam');
+        if (!cam || !cam.object3D) return;
+        var sPos = new THREE.Vector3();
+        var cPos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(sPos);
+        cam.object3D.getWorldPosition(cPos);
+        var d = sPos.distanceTo(cPos);
+        var vol;
+        var ref = this.data.refDistance;
+        var roll = this.data.rolloffFactor;
+        var max = this.data.maxDistance;
+        if (d <= ref) vol = 1;
+        else if (d >= max) vol = 0;
+        else vol = ref / (ref + roll * (d - ref));
+        this._gain.gain.value = vol * this.data.volume;
       }
     });
 
@@ -563,31 +695,33 @@
   draco-loader
   raycaster-warmup
   distant-explosions
-  fog="type: linear; color: #050912; near: 6; far: 24"
-  renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.18"
-  background="color: #050912"
+  fog="type: linear; color: #070c18; near: 8; far: 32"
+  renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.28"
+  background="color: #070c18"
   vr-mode-ui="enabled: true"
   loading-screen="dotsColor: #ffee88; backgroundColor: #000">
 
   <a-assets timeout="300000">
     <a-asset-item id="scene-glb" src="a_night_in_the_blitz_14.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
-    <!-- Preload audio so the first torch-on-radio hit doesn't stall decoding -->
-    <audio id="blitz-audio" src="blitz_audio_test.mp4" preload="auto" crossorigin="anonymous"></audio>
   </a-assets>
 
   <!-- Scene -->
   <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1" night-darken></a-entity>
 
   <!-- Sky — dark blue night, moonlit rather than pitch black -->
-  <a-sky color="#050912"></a-sky>
+  <a-sky color="#070c18"></a-sky>
 
-  <!-- Moon — soft disc visible in the sky for reference -->
-  <a-entity position="22 32 -40" no-fog>
-    <a-circle radius="1.6" rotation="0 210 0"
-      material="shader:flat; color:#f4f0dc; opacity:0.95; transparent:true; fog:false"></a-circle>
-    <a-circle radius="2.6" rotation="0 210 0"
-      material="shader:flat; color:#c8d4ff; opacity:0.18; transparent:true; fog:false"></a-circle>
+  <!-- Moon — emissive sphere (looks round from any angle) + two soft halos
+       via billboarded circles pointed at the camera via sprite-like flat
+       shader. The layered sizes/opacities give a gradient glow falloff. -->
+  <a-entity id="moon" position="66 48 -80" no-fog>
+    <a-sphere radius="3.2" segments-width="32" segments-height="24"
+      material="shader:flat; color:#fffaea; fog:false"></a-sphere>
+    <a-sphere radius="5.5" segments-width="24" segments-height="18"
+      material="shader:flat; color:#e6ebff; opacity:0.22; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
+    <a-sphere radius="9" segments-width="24" segments-height="18"
+      material="shader:flat; color:#8aa0d8; opacity:0.09; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
   </a-entity>
 
   <!-- ── Barrage Balloons — silver blimps ~28–50m overhead, slow drift ── -->
@@ -635,11 +769,12 @@
       material="color:#777; opacity:0.3; transparent:true"></a-cylinder>
   </a-entity>
 
-  <!-- ── Audio trigger — positional radio, louder as you approach ────────── -->
-  <!-- sound component with positional:true routes playback through a PannerNode.
-       src references the preloaded #blitz-audio asset so first play doesn't stall. -->
-  <a-entity position="1.9018 1.0607 -15.302" audio-trigger="once: true"
-    sound="src: #blitz-audio; positional: true; distanceModel: inverse; refDistance: 2; rolloffFactor: 2; volume: 1; autoplay: false; loop: false"
+  <!-- ── Audio trigger — positional radio, louder as you approach.
+       The audio-trigger component pre-decodes the mp4 into an AudioBuffer at
+       scene load (fetch → decodeAudioData), so when the torch raycaster first
+       hits, playback starts instantly. Volume attenuates with distance in tick. -->
+  <a-entity position="1.9018 1.0607 -15.302"
+    audio-trigger="src: blitz_audio_test.mp4; once: true; refDistance: 2; rolloffFactor: 2; volume: 1"
     geometry="primitive:sphere; radius:0.5"
     material="opacity:0; transparent:true; side:double">
   </a-entity>
@@ -658,11 +793,11 @@
         animation="property:rotation; from:-20 0 0; to:10 0 0; dur:4200; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.08; to:0.13; dur:2600; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -676,11 +811,11 @@
         animation="property:rotation; from:-8 0 0; to:14 0 0; dur:3300; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.2; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.13; to:0.21; dur:1900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.5; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#bbe0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.07; to:0.12; dur:3100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -694,11 +829,11 @@
         animation="property:rotation; from:-12 0 0; to:6 0 0; dur:5100; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.0; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.0; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.12; to:0.2; dur:2400; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.06; to:0.11; dur:3300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -712,11 +847,11 @@
         animation="property:rotation; from:-15 0 0; to:5 0 0; dur:4700; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.3; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.3; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.17; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.13; to:0.21; dur:2000; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.8; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.8; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#a8d0ff; opacity:0.09; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.07; to:0.12; dur:2800; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -730,11 +865,11 @@
         animation="property:rotation; from:-18 0 0; to:4 0 0; dur:3900; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.1; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.1; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.16; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.12; to:0.2; dur:2300; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.2; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:5.2; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#bbe0ff; opacity:0.08; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.06; to:0.11; dur:2900; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -748,11 +883,11 @@
         animation="property:rotation; from:-10 0 0; to:12 0 0; dur:4500; dir:alternate; loop:true; easing:easeInOutSine">
         <a-sphere radius="0.5" position="0 0.3 0" no-fog
           material="shader:flat; color:#fff4d8; fog:false"></a-sphere>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:2.4; radiusTop:0.1; segmentsRadial:32; openEnded:true"
           material="color:#ffffff; opacity:0.18; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.14; to:0.22; dur:2100; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
-        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:10; openEnded:true"
+        <a-entity geometry="primitive:cone; height:220; radiusBottom:6; radiusTop:0.3; segmentsRadial:32; openEnded:true"
           material="color:#a8d0ff; opacity:0.1; transparent:true; side:double; shader:flat; depthWrite:false"
           no-fog position="0 110 0"
           animation="property:material.opacity; from:0.08; to:0.13; dur:2700; dir:alternate; loop:true; easing:easeInOutSine"></a-entity>
@@ -762,16 +897,14 @@
   </a-entity>
 
   <!-- Lighting -->
-  <a-light id="scene-ambient" type="ambient" color="#1a2438" intensity="0.28"></a-light>
+  <a-light id="scene-ambient" type="ambient" color="#1e2a42" intensity="0.45"></a-light>
   <!-- Sun — off by default, switched on by day mode panel -->
   <a-light id="sun-light" type="directional" color="#fff8e8" intensity="0" position="-3 10 5"></a-light>
-  <!-- Moonlight — cool blue-white directional from the moon's sky position
-       (22 32 -40), strong enough to silhouette rooftops and glint on cobbles -->
-  <a-light id="moon-light" type="directional" color="#c8d8ff" intensity="0.75"
-           position="22 32 -40"></a-light>
-  <!-- Sky-dome fill — hemisphere light adds a soft upward cool wash so
-       nothing sits in total black between the moon's direction and shadow side -->
-  <a-entity light="type: hemisphere; color: #8096c8; groundColor: #0a0e18; intensity: 0.35"></a-entity>
+  <!-- Moonlight — cool blue-white directional, from the moon disc's direction -->
+  <a-light id="moon-light" type="directional" color="#c8d8ff" intensity="1.1"
+           position="66 48 -80"></a-light>
+  <!-- Sky-dome fill — hemisphere wash so shadow sides aren't pitch black -->
+  <a-entity light="type: hemisphere; color: #8096c8; groundColor: #0a0e18; intensity: 0.55"></a-entity>
   <!-- Blackout lamp lights — spotlights pointing straight down, light only reaches ground -->
   <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
            position="3.32 3.07 -19.04" target="#lamp-target-1"></a-light>
@@ -821,7 +954,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v56</div>
+<div id="version-overlay">v57</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -905,18 +1038,18 @@
 
   function setNight() {
     var scene = document.querySelector('a-scene');
-    _setExposure(0.18);
-    scene.setAttribute('fog', 'type:linear; color:#050912; near:6; far:24');
+    _setExposure(0.28);
+    scene.setAttribute('fog', 'type:linear; color:#070c18; near:8; far:32');
     var ambient = document.getElementById('scene-ambient');
-    if (ambient) ambient.setAttribute('light', 'color:#1a2438; intensity:0.28');
+    if (ambient) ambient.setAttribute('light', 'color:#1e2a42; intensity:0.45');
     var sun = document.getElementById('sun-light');
     if (sun) sun.setAttribute('light', 'intensity', 0);
     var moon = document.getElementById('moon-light');
-    if (moon) moon.setAttribute('light', 'intensity', 0.75);
+    if (moon) moon.setAttribute('light', 'intensity', 1.1);
     var sky = document.querySelector('a-sky');
-    if (sky) sky.setAttribute('color', '#050912');
-    scene.setAttribute('background', 'color: #050912');
-    _applySceneColors(0.2, 0.22, 0.28);
+    if (sky) sky.setAttribute('color', '#070c18');
+    scene.setAttribute('background', 'color: #070c18');
+    _applySceneColors(0.28, 0.3, 0.38);
     _applyGroundPBR(0.55, 0.1); // wet cobbles
     document.getElementById('btn-night').style.borderColor = '#ffffff';
     document.getElementById('btn-day').style.borderColor = '#ffcc66';
