@@ -196,32 +196,52 @@
       }
     });
 
-    // ── Scene materials fix — kills the "spider web" wall look caused by
-    //    GLB materials exported with alphaMode=MASK/BLEND: the brick texture's
-    //    alpha channel gets interpreted as transparency, turning solid walls
-    //    into lacy see-through strips. Force every scene mesh to opaque. ────
+    // ── Scene materials fix — cleans up three things the Blender→GLB export
+    //    leaves behind that break the look under blackout lighting:
+    //      1. Vertex colors on brick meshes — many verts export as near-black
+    //         and multiply into the texture, producing the "spider web"
+    //         speckle on walls. Strip the color attribute and disable
+    //         vertexColors on the material.
+    //      2. Emissive floors / lightboxes — Blender materials exported with
+    //         emissive colors/maps render as glowing rectangles against the
+    //         black sky. Zero emissive + clear emissiveMap.
+    //      3. Single-sided meshes with flipped normals — most commonly the
+    //         ground plane. Force DoubleSide so the floor renders regardless
+    //         of which way Blender pointed the normal.
     AFRAME.registerComponent('scene-materials-fix', {
       init: function () {
         this.el.addEventListener('model-loaded', function (e) {
           try {
             var model = e.detail.model;
+            var meshCount = 0;
             model.traverse(function (node) {
               if (!node.isMesh) return;
+              meshCount++;
+              // Strip baked vertex colors — they're the real cause of the
+              // speckly "spider web" brick walls.
+              if (node.geometry && node.geometry.attributes && node.geometry.attributes.color) {
+                node.geometry.deleteAttribute('color');
+              }
               var mats = Array.isArray(node.material) ? node.material : [node.material];
               mats.forEach(function (m) {
                 if (!m) return;
+                m.vertexColors = false;
+                // Force opaque (alphaMode MASK/BLEND exports also cause lacy walls)
                 m.transparent = false;
                 m.opacity = 1;
                 m.alphaTest = 0;
+                m.alphaMap = null;
                 m.depthWrite = true;
-                m.depthTest = true;
-                if (m.map) { m.map.premultiplyAlpha = false; }
-                // Three.js reads GLTF alphaMode into userData
-                if (m.userData) { m.userData.alphaMode = 'OPAQUE'; }
-                m.side = THREE.FrontSide;
+                // Kill emissive — no self-glowing floors/signs in blackout
+                if (m.emissive) m.emissive.setRGB(0, 0, 0);
+                m.emissiveIntensity = 0;
+                m.emissiveMap = null;
+                // DoubleSide so thin/flipped faces (floor) stay visible
+                m.side = THREE.DoubleSide;
                 m.needsUpdate = true;
               });
             });
+            console.log('[scene-materials-fix] cleaned ' + meshCount + ' meshes');
           } catch (err) { console.warn('scene-materials-fix error:', err); }
         });
       }
@@ -282,24 +302,30 @@
         nose.setAttribute('material', bodyMat);
         this.el.appendChild(nose);
 
-        // Three tail fins — rounded inflated flaps (flattened spheres, not slats)
-        var finScale = (L * 0.28) + ' ' + (r * 1.35) + ' 0.12';
-        var finTailX = -L * 0.96;
-        var fins = [
-          { rot: '0 0 0',    pos: finTailX + ' ' + (r * 1.0)  + ' 0' },
-          { rot: '60 0 0',   pos: finTailX + ' ' + (-r * 0.18) + ' ' + (-r * 0.78) },
-          { rot: '-60 0 0',  pos: finTailX + ' ' + (-r * 0.18) + ' ' + (r * 0.78) }
-        ];
-        fins.forEach(function (f) {
-          var fin = document.createElement('a-sphere');
-          fin.setAttribute('radius', 1);
-          fin.setAttribute('scale', finScale);
-          fin.setAttribute('position', f.pos);
-          fin.setAttribute('rotation', f.rot);
-          fin.setAttribute('segments-width', 14);
-          fin.setAttribute('segments-height', 10);
+        // Three tail fins in classic Y-fin layout: top + lower-port + lower-starboard.
+        // Each fin lives inside a container rotated around the balloon's
+        // longitudinal (X) axis by 0° / 120° / -120°. The fin itself is an
+        // a-box pushed outward in +Y from the container so its base just kisses
+        // the hull after rotation. Box gives a crisp flat-plate silhouette
+        // (no cone-tail illusion like flattened spheres produced).
+        var self = this;
+        var finLen   = L * 0.34;    // fore-aft length along balloon axis
+        var finTall  = r * 1.5;     // radial extent from hull outward
+        var finThick = 0.1;         // through-thickness
+        var finBaseR = r + finTall * 0.5; // center of fin from balloon axis
+        var finX     = -L * 0.82;   // longitudinal position (near tail)
+        [0, 120, -120].forEach(function (deg) {
+          var hub = document.createElement('a-entity');
+          hub.setAttribute('position', finX + ' 0 0');
+          hub.setAttribute('rotation', deg + ' 0 0');
+          var fin = document.createElement('a-box');
+          fin.setAttribute('width', finLen);
+          fin.setAttribute('height', finTall);
+          fin.setAttribute('depth', finThick);
+          fin.setAttribute('position', '0 ' + finBaseR + ' 0');
           fin.setAttribute('material', finMat);
-          this.el.appendChild(fin);
+          hub.appendChild(fin);
+          self.el.appendChild(hub);
         });
 
         // Rigging pendant band — dark hoop around the belly where cables attach
@@ -1509,7 +1535,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v67</div>
+<div id="version-overlay">v68</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
