@@ -196,6 +196,136 @@
       }
     });
 
+    // ── Scene materials fix — kills the "spider web" wall look caused by
+    //    GLB materials exported with alphaMode=MASK/BLEND: the brick texture's
+    //    alpha channel gets interpreted as transparency, turning solid walls
+    //    into lacy see-through strips. Force every scene mesh to opaque. ────
+    AFRAME.registerComponent('scene-materials-fix', {
+      init: function () {
+        this.el.addEventListener('model-loaded', function (e) {
+          try {
+            var model = e.detail.model;
+            model.traverse(function (node) {
+              if (!node.isMesh) return;
+              var mats = Array.isArray(node.material) ? node.material : [node.material];
+              mats.forEach(function (m) {
+                if (!m) return;
+                m.transparent = false;
+                m.opacity = 1;
+                m.alphaTest = 0;
+                m.depthWrite = true;
+                m.depthTest = true;
+                if (m.map) { m.map.premultiplyAlpha = false; }
+                // Three.js reads GLTF alphaMode into userData
+                if (m.userData) { m.userData.alphaMode = 'OPAQUE'; }
+                m.side = THREE.FrontSide;
+                m.needsUpdate = true;
+              });
+            });
+          } catch (err) { console.warn('scene-materials-fix error:', err); }
+        });
+      }
+    });
+
+    // ── Barrage balloon builder — generates a historically convincing WWII
+    //    balloon as child primitives: inflated cigar body, top ballonet bulge,
+    //    rounded nose cap, three tapered tail fins (top + lower-port/starboard),
+    //    rigging pendant band around the belly, taut mooring cable. Colors
+    //    and sizes are data-driven so all five can share the same builder.
+    //    Segment counts kept lean for Quest: body 24×14, smaller parts 14×10.
+    AFRAME.registerComponent('barrage-balloon', {
+      schema: {
+        length:      {default: 6},      // long-axis scale (radius 1 sphere)
+        diameter:    {default: 2},      // cross-section scale
+        cableHeight: {default: 15},     // mooring cable length (0 = none)
+        color:       {default: '#7a8e9a'},
+        finColor:    {default: '#5a6e7a'},
+        rigColor:    {default: '#3a3a3a'}
+      },
+      init: function () {
+        var d = this.data;
+        var r = d.diameter;
+        var L = d.length;
+        var bodyMat = 'shader:standard; color:' + d.color +
+                      '; metalness:0.4; roughness:0.38;' +
+                      ' emissive:#0a1018; emissiveIntensity:0.08';
+        var finMat  = 'shader:standard; color:' + d.finColor +
+                      '; metalness:0.2; roughness:0.6; side:double';
+        var rigMat  = 'color:' + d.rigColor + '; roughness:0.9; metalness:0.15';
+
+        // Inflated cigar body
+        var body = document.createElement('a-sphere');
+        body.setAttribute('radius', 1);
+        body.setAttribute('scale', L + ' ' + r + ' ' + r);
+        body.setAttribute('segments-width', 24);
+        body.setAttribute('segments-height', 14);
+        body.setAttribute('material', bodyMat);
+        this.el.appendChild(body);
+
+        // Dorsal ballonet bulge — the characteristic "pregnancy" on top
+        var bulge = document.createElement('a-sphere');
+        bulge.setAttribute('radius', 1);
+        bulge.setAttribute('scale', (L * 0.42) + ' ' + (r * 0.5) + ' ' + (r * 0.9));
+        bulge.setAttribute('position', (L * 0.08) + ' ' + (r * 0.82) + ' 0');
+        bulge.setAttribute('segments-width', 18);
+        bulge.setAttribute('segments-height', 10);
+        bulge.setAttribute('material', bodyMat);
+        this.el.appendChild(bulge);
+
+        // Rounded nose cap — slightly fatter bow, separates silhouette from plain sphere
+        var nose = document.createElement('a-sphere');
+        nose.setAttribute('radius', 1);
+        nose.setAttribute('scale', (L * 0.18) + ' ' + (r * 1.06) + ' ' + (r * 1.06));
+        nose.setAttribute('position', (L * 0.88) + ' 0 0');
+        nose.setAttribute('segments-width', 18);
+        nose.setAttribute('segments-height', 12);
+        nose.setAttribute('material', bodyMat);
+        this.el.appendChild(nose);
+
+        // Three tail fins — rounded inflated flaps (flattened spheres, not slats)
+        var finScale = (L * 0.28) + ' ' + (r * 1.35) + ' 0.12';
+        var finTailX = -L * 0.96;
+        var fins = [
+          { rot: '0 0 0',    pos: finTailX + ' ' + (r * 1.0)  + ' 0' },
+          { rot: '60 0 0',   pos: finTailX + ' ' + (-r * 0.18) + ' ' + (-r * 0.78) },
+          { rot: '-60 0 0',  pos: finTailX + ' ' + (-r * 0.18) + ' ' + (r * 0.78) }
+        ];
+        fins.forEach(function (f) {
+          var fin = document.createElement('a-sphere');
+          fin.setAttribute('radius', 1);
+          fin.setAttribute('scale', finScale);
+          fin.setAttribute('position', f.pos);
+          fin.setAttribute('rotation', f.rot);
+          fin.setAttribute('segments-width', 14);
+          fin.setAttribute('segments-height', 10);
+          fin.setAttribute('material', finMat);
+          this.el.appendChild(fin);
+        });
+
+        // Rigging pendant band — dark hoop around the belly where cables attach
+        var band = document.createElement('a-torus');
+        band.setAttribute('radius', r * 1.02);
+        band.setAttribute('radius-tubular', 0.04);
+        band.setAttribute('segments-tubular', 24);
+        band.setAttribute('segments-radial', 8);
+        band.setAttribute('rotation', '90 0 0');
+        band.setAttribute('position', (-L * 0.12) + ' 0 0');
+        band.setAttribute('material', rigMat);
+        this.el.appendChild(band);
+
+        // Mooring cable — thicker, taut, attached at belly pendant band
+        if (d.cableHeight > 0) {
+          var cable = document.createElement('a-cylinder');
+          cable.setAttribute('radius', 0.03);
+          cable.setAttribute('height', d.cableHeight);
+          cable.setAttribute('segments-radial', 6);
+          cable.setAttribute('position', (-L * 0.12) + ' ' + (-r - d.cableHeight / 2) + ' 0');
+          cable.setAttribute('material', rigMat);
+          this.el.appendChild(cable);
+        }
+      }
+    });
+
     // ── Torch flicker — random light intensity variation ──────────────────
     AFRAME.registerComponent('torch-flicker', {
       schema: { base: {default: 0.9}, range: {default: 0.35}, speed: {default: 8} },
@@ -1078,12 +1208,12 @@
   loading-screen="dotsColor: #ffee88; backgroundColor: #000">
 
   <a-assets timeout="300000">
-    <a-asset-item id="scene-glb" src="a_night_in_the_blitz_14.glb"></a-asset-item>
+    <a-asset-item id="scene-glb" src="a_night_in_the_blitz_21.glb"></a-asset-item>
     <a-asset-item id="torch-glb" src="torch.glb"></a-asset-item>
   </a-assets>
 
   <!-- Scene -->
-  <a-entity gltf-model="#scene-glb" position="0 0 0" scale="1 1 1"></a-entity>
+  <a-entity gltf-model="#scene-glb" scene-materials-fix position="0 0 0" scale="1 1 1"></a-entity>
 
   <!-- Sky — dark blue night, moonlit rather than pitch black -->
   <a-sky color="#070c18"></a-sky>
@@ -1100,85 +1230,39 @@
       material="shader:flat; color:#8aa0d8; opacity:0.09; transparent:true; fog:false; depthWrite:false; side:back"></a-sphere>
   </a-entity>
 
-  <!-- ── Barrage Balloons — silver fabric blimps, moonlit, no self-glow.
-       Scale is length:height:depth — real balloons were ~19m long but these
-       are kept proportionally convincing for the scene. Fins at the tail
-       (-X side of the elongated sphere) stabilise the shape visually.     -->
+  <!-- ── Barrage Balloons — silver WWII fabric blimps, moonlit, no self-glow.
+       Built by the `barrage-balloon` component: cigar body, dorsal ballonet
+       bulge, rounded nose cap, three tapered tail fins, pendant rigging band
+       and taut mooring cable. Positions + drift animations vary per balloon. -->
 
   <a-entity id="balloon-1" position="3 15 -18" no-fog
+    barrage-balloon="length: 6; diameter: 2; cableHeight: 15; color: #7a8e9a; finColor: #5a6e7a"
     animation="property:position; from:3 15 -18; to:3 16.2 -18; dur:9000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -4; to:0 25 4; dur:38000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="6 2 2" radius="1"
-      material="shader:standard; color:#7a8e9a; metalness:0.22; roughness:0.55; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
-    <!-- Dorsal fin -->
-    <a-box width="0.12" height="1.6" depth="0.9" position="-5.6 1.4 0"
-      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <!-- Port fin -->
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.6 0.2 -1.1" rotation="0 0 -50"
-      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <!-- Starboard fin -->
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.6 0.2 1.1" rotation="0 0 50"
-      material="shader:standard; color:#5a6e7a; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-cylinder radius="0.014" height="15" color="#555" position="0 -7.5 0"
-      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-2" position="-2 20 -28" no-fog
+    barrage-balloon="length: 7; diameter: 2.2; cableHeight: 20; color: #788a96; finColor: #586878"
     animation="property:position; from:-2 20 -28; to:-2 21.5 -28; dur:11000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 3; to:0 -30 -3; dur:44000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="7 2.2 2.2" radius="1"
-      material="shader:standard; color:#788a96; metalness:0.2; roughness:0.58; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
-    <a-box width="0.12" height="1.8" depth="1.0" position="-6.6 1.6 0"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.6" depth="1.0" position="-6.6 0.2 -1.2" rotation="0 0 -50"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.6" depth="1.0" position="-6.6 0.2 1.2" rotation="0 0 50"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-cylinder radius="0.014" height="20" color="#555" position="0 -10 0"
-      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-3" position="11 17 -22" no-fog
+    barrage-balloon="length: 6.5; diameter: 2.1; cableHeight: 17; color: #7c8e9c; finColor: #5c6c7c"
     animation="property:position; from:11 17 -22; to:11 18.5 -22; dur:8500; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -6; to:0 20 5; dur:32000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="6.5 2.1 2.1" radius="1"
-      material="shader:standard; color:#7c8e9c; metalness:0.24; roughness:0.52; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
-    <a-box width="0.12" height="1.7" depth="0.95" position="-6.1 1.5 0"
-      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.5" depth="0.95" position="-6.1 0.2 -1.15" rotation="0 0 -50"
-      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.5" depth="0.95" position="-6.1 0.2 1.15" rotation="0 0 50"
-      material="shader:standard; color:#5c6c7c; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-cylinder radius="0.014" height="17" color="#555" position="0 -8.5 0"
-      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <a-entity id="balloon-4" position="18 22 -12" no-fog
+    barrage-balloon="length: 5.8; diameter: 2; cableHeight: 0; color: #7a8c98; finColor: #5a6a78"
     animation="property:position; from:18 22 -12; to:18 23.5 -12; dur:13000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 4; to:0 -18 -4; dur:50000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="5.8 2 2" radius="1"
-      material="shader:standard; color:#7a8c98; metalness:0.2; roughness:0.56; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
-    <a-box width="0.12" height="1.6" depth="0.9" position="-5.4 1.4 0"
-      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.4 0.2 -1.1" rotation="0 0 -50"
-      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.4 0.2 1.1" rotation="0 0 50"
-      material="shader:standard; color:#5a6a78; roughness:0.65; metalness:0.15; side:double"></a-box>
   </a-entity>
 
   <a-entity id="balloon-5" position="-6 16 -10" no-fog
+    barrage-balloon="length: 6.2; diameter: 2; cableHeight: 16; color: #788c9a; finColor: #586878"
     animation="property:position; from:-6 16 -10; to:-6 17.2 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
-    <a-sphere scale="6.2 2 2" radius="1"
-      material="shader:standard; color:#788c9a; metalness:0.22; roughness:0.54; emissive:#080e14; emissiveIntensity:0.1; side:front"></a-sphere>
-    <a-box width="0.12" height="1.6" depth="0.9" position="-5.8 1.4 0"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.8 0.2 -1.1" rotation="0 0 -50"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-box width="0.12" height="1.4" depth="0.9" position="-5.8 0.2 1.1" rotation="0 0 50"
-      material="shader:standard; color:#586878; roughness:0.65; metalness:0.15; side:double"></a-box>
-    <a-cylinder radius="0.014" height="16" color="#555" position="0 -8 0"
-      material="color:#666; opacity:0.4; transparent:true"></a-cylinder>
   </a-entity>
 
   <!-- ── Audio trigger — positional radio, louder as you approach.
@@ -1425,7 +1509,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v66 DEBUG</div>
+<div id="version-overlay">v67</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
