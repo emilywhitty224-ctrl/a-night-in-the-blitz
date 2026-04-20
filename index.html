@@ -437,9 +437,7 @@
         var panel = document.createElement('a-plane');
         panel.setAttribute('width', 1.2);
         panel.setAttribute('height', 0.3);
-        panel.setAttribute('color', '#000');
-        panel.setAttribute('opacity', 0.75);
-        panel.setAttribute('material', 'shader: flat; transparent: true');
+        panel.setAttribute('material', 'shader: flat; color: #000; opacity: 0.75; transparent: true; depthTest: false');
         panel.setAttribute('position', '0 -0.28 -0.7');
         cam.appendChild(panel);
 
@@ -1486,33 +1484,33 @@
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle audio-unlock-vr></a-entity>
-
-    <!-- Torch at rest. Reposition this entity to wherever the torch should sit
-         in the scene. On grip within ~0.25 m, torch-pickup reparents its
-         object3D onto the right controller at held pose (0 -0.07 0.05, -140 0 0). -->
-    <a-entity id="torch" position="0 0.56 -0.8" rotation="-90 0 0" torch-pickup>
-      <!-- Moonlight bounce inside torch so it toggles off with it -->
-      <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-      <!-- Torch GLB model — matte, responds to torch light, no reflections -->
-      <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 0" position="0 0 0" matte-darken></a-entity>
-      <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
-      <a-entity id="torch-glow" position="0 0.055 0">
-        <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
-        <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
+              torch-toggle audio-unlock-vr>
+      <!-- Torch held in right hand at spawn. Walk to the spot you want, then
+           press LEFT TRIGGER — coord-readout captures #torch's world pose to
+           the HUD so we can bake a resting position later. -->
+      <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
+        <!-- Moonlight bounce inside torch so it toggles off with it -->
+        <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
+        <!-- Torch GLB model — matte, responds to torch light, no reflections -->
+        <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 0" position="0 0 0" matte-darken></a-entity>
+        <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
+        <a-entity id="torch-glow" position="0 0.055 0">
+          <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
+          <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
+        </a-entity>
+        <!-- Spotlight target — far forward so beam follows hand direction -->
+        <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
+        <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
+        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
+                  torch-flicker="base:112; range:25; speed:2.5"
+                  position="0 0.08 0"></a-entity>
       </a-entity>
-      <!-- Spotlight target — far forward so beam follows hand direction -->
-      <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
-      <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-      <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
-                torch-flicker="base:112; range:25; speed:2.5"
-                position="0 0.08 0"></a-entity>
     </a-entity>
 
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v75</div>
+<div id="version-overlay">v76</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
