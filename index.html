@@ -424,70 +424,6 @@
       }
     });
 
-    // ── Coord readout — press LEFT TRIGGER to capture #torch's current world
-    //    pose onto a camera-locked HUD and to the console. Screenshot-friendly
-    //    so the user can send the numbers back for baking into the HTML. ─────
-    AFRAME.registerComponent('coord-readout', {
-      init: function () {
-        var self = this;
-        var cam = document.getElementById('cam');
-        if (!cam) return;
-
-        // HUD: dark panel + text, placed 0.7 m in front of the camera, slightly below gaze.
-        var panel = document.createElement('a-plane');
-        panel.setAttribute('width', 1.2);
-        panel.setAttribute('height', 0.3);
-        panel.setAttribute('material', 'shader: flat; color: #000; opacity: 0.75; transparent: true; depthTest: false');
-        panel.setAttribute('position', '0 -0.28 -0.7');
-        cam.appendChild(panel);
-
-        var label = document.createElement('a-entity');
-        label.setAttribute('position', '0 -0.28 -0.699');
-        label.setAttribute('text', {
-          value: 'Pick up torch, walk to spot,\npress LEFT TRIGGER to capture coords',
-          align: 'center', color: '#ffffff', width: 1.6, wrapCount: 42, shader: 'msdf'
-        });
-        cam.appendChild(label);
-        this._label = label;
-
-        (function bind() {
-          var leftCtrl = document.querySelector('[oculus-touch-controls*="left"]');
-          if (!leftCtrl) { setTimeout(bind, 500); return; }
-          self._leftCtrl = leftCtrl;
-          leftCtrl.addEventListener('triggerdown', function () { self._capture(); });
-        })();
-      },
-
-      _capture: function () {
-        var torch = document.getElementById('torch');
-        if (!torch || !torch.object3D) return;
-        var pos = new THREE.Vector3();
-        var q   = new THREE.Quaternion();
-        torch.object3D.getWorldPosition(pos);
-        torch.object3D.getWorldQuaternion(q);
-        var eul = new THREE.Euler().setFromQuaternion(q, 'YXZ');
-        var rx = THREE.MathUtils.radToDeg(eul.x);
-        var ry = THREE.MathUtils.radToDeg(eul.y);
-        var rz = THREE.MathUtils.radToDeg(eul.z);
-        var f3 = function (n) { return n.toFixed(3); };
-        var f1 = function (n) { return n.toFixed(1); };
-        var text =
-          'position="' + f3(pos.x) + ' ' + f3(pos.y) + ' ' + f3(pos.z) + '"\n' +
-          'rotation="' + f1(rx)    + ' ' + f1(ry)    + ' ' + f1(rz)    + '"';
-        this._label.setAttribute('text', {
-          value: text, align: 'center', color: '#aaffaa',
-          width: 1.6, wrapCount: 42, shader: 'msdf'
-        });
-        console.log('[coord-readout] #torch ' + text.replace('\n', '  '));
-        try {
-          var gp = this._leftCtrl.components['oculus-touch-controls'];
-          if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
-            gp.controller.hapticActuators[0].pulse(0.6, 80);
-          }
-        } catch (e) {}
-      }
-    });
-
     // ── Torch toggle — right A button (beam only, model stays visible) ──────
     AFRAME.registerComponent('torch-toggle', {
       init: function () {
@@ -1211,7 +1147,6 @@
   raycaster-warmup
   distant-explosions
   sky-target
-  coord-readout
   fog="type: linear; color: #070c18; near: 8; far: 32"
   renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.28; foveation: 1"
   background="color: #070c18"
@@ -1484,33 +1419,34 @@
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle audio-unlock-vr>
-      <!-- Torch held in right hand at spawn. Walk to the spot you want, then
-           press LEFT TRIGGER — coord-readout captures #torch's world pose to
-           the HUD so we can bake a resting position later. -->
-      <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
-        <!-- Moonlight bounce inside torch so it toggles off with it -->
-        <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — matte, responds to torch light, no reflections -->
-        <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 0" position="0 0 0" matte-darken></a-entity>
-        <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
-        <a-entity id="torch-glow" position="0 0.055 0">
-          <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
-          <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
-        </a-entity>
-        <!-- Spotlight target — far forward so beam follows hand direction -->
-        <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
-        <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
-                  torch-flicker="base:112; range:25; speed:2.5"
-                  position="0 0.08 0"></a-entity>
+              torch-toggle audio-unlock-vr></a-entity>
+
+    <!-- Torch — rests at the captured spot until the player grips within 0.4 m
+         with the right controller. torch-pickup reparents it onto the hand at
+         the held pose. Resting pose baked from VR coord-readout (v76). -->
+    <a-entity id="torch" position="-2.960 0.758 -3.235" rotation="2.6 -16.4 91.7"
+              torch-pickup="threshold: 0.4">
+      <!-- Moonlight bounce inside torch so it toggles off with it -->
+      <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
+      <!-- Torch GLB model — matte, responds to torch light, no reflections -->
+      <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 0" position="0 0 0" matte-darken></a-entity>
+      <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
+      <a-entity id="torch-glow" position="0 0.055 0">
+        <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
+        <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
       </a-entity>
+      <!-- Spotlight target — far forward so beam follows hand direction -->
+      <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
+      <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
+      <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
+                torch-flicker="base:112; range:25; speed:2.5"
+                position="0 0.08 0"></a-entity>
     </a-entity>
 
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v76</div>
+<div id="version-overlay">v77</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
