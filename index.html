@@ -381,6 +381,115 @@
     });
 
 
+    // ── Torch pickup — pressing grip on the right controller within
+    //    `threshold` metres of the torch reparents its object3D onto the right
+    //    controller and snaps it to the held local pose. object3D.add (not DOM
+    //    reparent) keeps ids/components intact so torch-toggle/flicker still
+    //    find #torch-point and #torch-glow by id. ─────────────────────────────
+    AFRAME.registerComponent('torch-pickup', {
+      schema: {
+        threshold:   { default: 0.25 },
+        handSelector:{ default: '[oculus-touch-controls*="right"]' }
+      },
+      init: function () {
+        this._picked = false;
+        var self = this;
+        (function bind() {
+          var rightCtrl = document.querySelector(self.data.handSelector);
+          if (!rightCtrl) { setTimeout(bind, 500); return; }
+          self._rightCtrl = rightCtrl;
+          rightCtrl.addEventListener('gripdown', function () { self._tryPickup(); });
+        })();
+      },
+      _tryPickup: function () {
+        if (this._picked) return;
+        var hand = this._rightCtrl;
+        if (!hand || !hand.object3D) return;
+        var handPos  = new THREE.Vector3();
+        var torchPos = new THREE.Vector3();
+        hand.object3D.getWorldPosition(handPos);
+        this.el.object3D.getWorldPosition(torchPos);
+        if (handPos.distanceTo(torchPos) > this.data.threshold) return;
+        // Reparent torch onto the right controller at the saved held pose.
+        hand.object3D.add(this.el.object3D);
+        this.el.object3D.position.set(0, -0.07, 0.05);
+        this.el.object3D.rotation.set(THREE.MathUtils.degToRad(-140), 0, 0);
+        this._picked = true;
+        try {
+          var gp = hand.components['oculus-touch-controls'];
+          if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+            gp.controller.hapticActuators[0].pulse(0.8, 120);
+          }
+        } catch(e) {}
+      }
+    });
+
+    // ── Coord readout — press LEFT TRIGGER to capture #torch's current world
+    //    pose onto a camera-locked HUD and to the console. Screenshot-friendly
+    //    so the user can send the numbers back for baking into the HTML. ─────
+    AFRAME.registerComponent('coord-readout', {
+      init: function () {
+        var self = this;
+        var cam = document.getElementById('cam');
+        if (!cam) return;
+
+        // HUD: dark panel + text, placed 0.7 m in front of the camera, slightly below gaze.
+        var panel = document.createElement('a-plane');
+        panel.setAttribute('width', 1.2);
+        panel.setAttribute('height', 0.3);
+        panel.setAttribute('color', '#000');
+        panel.setAttribute('opacity', 0.75);
+        panel.setAttribute('material', 'shader: flat; transparent: true');
+        panel.setAttribute('position', '0 -0.28 -0.7');
+        cam.appendChild(panel);
+
+        var label = document.createElement('a-entity');
+        label.setAttribute('position', '0 -0.28 -0.699');
+        label.setAttribute('text', {
+          value: 'Pick up torch, walk to spot,\npress LEFT TRIGGER to capture coords',
+          align: 'center', color: '#ffffff', width: 1.6, wrapCount: 42, shader: 'msdf'
+        });
+        cam.appendChild(label);
+        this._label = label;
+
+        (function bind() {
+          var leftCtrl = document.querySelector('[oculus-touch-controls*="left"]');
+          if (!leftCtrl) { setTimeout(bind, 500); return; }
+          self._leftCtrl = leftCtrl;
+          leftCtrl.addEventListener('triggerdown', function () { self._capture(); });
+        })();
+      },
+
+      _capture: function () {
+        var torch = document.getElementById('torch');
+        if (!torch || !torch.object3D) return;
+        var pos = new THREE.Vector3();
+        var q   = new THREE.Quaternion();
+        torch.object3D.getWorldPosition(pos);
+        torch.object3D.getWorldQuaternion(q);
+        var eul = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+        var rx = THREE.MathUtils.radToDeg(eul.x);
+        var ry = THREE.MathUtils.radToDeg(eul.y);
+        var rz = THREE.MathUtils.radToDeg(eul.z);
+        var f3 = function (n) { return n.toFixed(3); };
+        var f1 = function (n) { return n.toFixed(1); };
+        var text =
+          'position="' + f3(pos.x) + ' ' + f3(pos.y) + ' ' + f3(pos.z) + '"\n' +
+          'rotation="' + f1(rx)    + ' ' + f1(ry)    + ' ' + f1(rz)    + '"';
+        this._label.setAttribute('text', {
+          value: text, align: 'center', color: '#aaffaa',
+          width: 1.6, wrapCount: 42, shader: 'msdf'
+        });
+        console.log('[coord-readout] #torch ' + text.replace('\n', '  '));
+        try {
+          var gp = this._leftCtrl.components['oculus-touch-controls'];
+          if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+            gp.controller.hapticActuators[0].pulse(0.6, 80);
+          }
+        } catch (e) {}
+      }
+    });
+
     // ── Torch toggle — right A button (beam only, model stays visible) ──────
     AFRAME.registerComponent('torch-toggle', {
       init: function () {
@@ -405,116 +514,6 @@
           });
         }
         bind();
-      }
-    });
-
-    // ── Torch raycaster — filtered to [audio-trigger] objects only.
-    //    When a trigger is hit, a single one-shot occlusion check fires toward
-    //    the trigger against the scene GLB only. This avoids scanning all meshes
-    //    every tick (the freeze cause), while still blocking signals through walls.
-    AFRAME.registerComponent('torch-raycaster', {
-      init: function () {
-        this.el.setAttribute('raycaster', 'direction: 0 1 0; near: 0; far: 15; objects: [audio-trigger]');
-        this._wallRC = new THREE.Raycaster();
-        var self = this;
-        this.el.addEventListener('raycaster-intersection', function (e) {
-          e.detail.els.forEach(function (triggerEl) {
-            if (self._isOccluded(triggerEl)) return;
-            var c = triggerEl.components['audio-trigger'];
-            if (c) c.triggerPlay();
-          });
-        });
-      },
-      _isOccluded: function (triggerEl) {
-        var sceneEl = document.querySelector('[gltf-model="#scene-glb"]');
-        if (!sceneEl || !sceneEl.object3D) return false;
-        var torchPos = new THREE.Vector3();
-        var tgtPos = new THREE.Vector3();
-        this.el.object3D.getWorldPosition(torchPos);
-        triggerEl.object3D.getWorldPosition(tgtPos);
-        var dir = tgtPos.clone().sub(torchPos);
-        var dist = dir.length();
-        dir.normalize();
-        this._wallRC.set(torchPos, dir);
-        this._wallRC.far = dist - 0.15;
-        var hits = this._wallRC.intersectObject(sceneEl.object3D, true);
-        return hits.length > 0;
-      }
-    });
-
-    // ── Positional audio trigger — pre-decodes the audio file into an
-    //    AudioBuffer at scene load so playback on trigger is instant.
-    //    A-Frame's sound component decodes lazily on first play, which is
-    //    what caused the 30-second delay + frame freeze when the torch
-    //    first swept across the radio. Distance attenuation is a simple
-    //    inverse model computed per tick against the camera position. ─────
-    AFRAME.registerComponent('audio-trigger', {
-      schema: {
-        src: { type: 'string' },
-        once: { type: 'boolean', default: true },
-        refDistance: { default: 2 },
-        rolloffFactor: { default: 2 },
-        maxDistance: { default: 40 },
-        volume: { default: 1 }
-      },
-      init: function () {
-        this._buffer = null;
-        this._played = false;
-        this._source = null;
-        this._gain = null;
-        var self = this;
-        // Kick off fetch + decode immediately. The decode can start before the
-        // scene GLB finishes downloading, so the buffer is usually ready well
-        // before the user's torch reaches the radio.
-        fetch(this.data.src)
-          .then(function (r) { return r.arrayBuffer(); })
-          .then(function (ab) {
-            var ctx = AFRAME.THREE.AudioContext.getContext();
-            return new Promise(function (resolve, reject) {
-              ctx.decodeAudioData(ab, resolve, reject);
-            });
-          })
-          .then(function (buf) {
-            self._buffer = buf;
-            console.log('[audio-trigger] buffer ready:', buf.duration.toFixed(1) + 's');
-          })
-          .catch(function (e) { console.warn('[audio-trigger] decode failed:', e); });
-      },
-      triggerPlay: function () {
-        if (this.data.once && this._played) return;
-        if (!this._buffer) { return; }
-        var ctx = AFRAME.THREE.AudioContext.getContext();
-        if (ctx.state === 'suspended') { try { ctx.resume(); } catch(e) {} }
-        try {
-          var src = ctx.createBufferSource();
-          src.buffer = this._buffer;
-          var gain = ctx.createGain();
-          gain.gain.value = 0;
-          src.connect(gain);
-          gain.connect(ctx.destination);
-          src.start(0);
-          this._source = src;
-          this._gain = gain;
-          this._played = true;
-        } catch(e) { console.warn('[audio-trigger] play failed:', e); }
-      },
-      tick: function () {
-        if (!this._gain) return;
-        var cam = document.getElementById('cam');
-        if (!cam || !cam.object3D) return;
-        var sPos = new THREE.Vector3();
-        var cPos = new THREE.Vector3();
-        this.el.object3D.getWorldPosition(sPos);
-        cam.object3D.getWorldPosition(cPos);
-        var d = sPos.distanceTo(cPos);
-        var vol;
-        var ref = this.data.refDistance;
-        var roll = this.data.rolloffFactor;
-        var max = this.data.maxDistance;
-        if (d <= ref) vol = 1;
-        else if (d >= max) vol = 0;
-        else vol = ref / (ref + roll * (d - ref));
-        this._gain.gain.value = vol * this.data.volume;
       }
     });
 
@@ -1214,6 +1213,7 @@
   raycaster-warmup
   distant-explosions
   sky-target
+  coord-readout
   fog="type: linear; color: #070c18; near: 8; far: 32"
   renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.28; foveation: 1"
   background="color: #070c18"
@@ -1276,16 +1276,6 @@
     barrage-balloon="length: 6.2; diameter: 2; cableHeight: 16; color: #788c9a; finColor: #586878"
     animation="property:position; from:-6 16 -10; to:-6 17.2 -10; dur:10000; dir:alternate; loop:true; easing:easeInOutSine"
     animation__rot="property:rotation; from:0 0 -3; to:0 35 3; dur:42000; dir:alternate; loop:true; easing:linear">
-  </a-entity>
-
-  <!-- ── Audio trigger — positional radio, louder as you approach.
-       The audio-trigger component pre-decodes the mp4 into an AudioBuffer at
-       scene load (fetch → decodeAudioData), so when the torch raycaster first
-       hits, playback starts instantly. Volume attenuates with distance in tick. -->
-  <a-entity position="1.9018 1.0607 -15.302"
-    audio-trigger="src: blitz_audio_test.m4a; once: true; refDistance: 2; rolloffFactor: 2; volume: 1"
-    geometry="primitive:sphere; radius:0.5"
-    material="opacity:0; transparent:true; side:double">
   </a-entity>
 
   <!-- ── Searchlights — 8 AA pencil beams (WWII 150cm carbon-arc lamps).
@@ -1496,33 +1486,33 @@
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle audio-unlock-vr>
-      <!-- Torch model — held in right hand from spawn, points forward (-Z) -->
-      <!-- down 5cm (-0.07), back 10cm (+0.05 in controller Z = toward player) -->
-      <a-entity id="torch" position="0 -0.07 0.05" rotation="-140 0 0">
-        <!-- Moonlight bounce inside torch so it toggles off with it -->
-        <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
-        <!-- Torch GLB model — matte, responds to torch light, no reflections -->
-        <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="90 0 0" position="0 0 0" matte-darken></a-entity>
-        <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
-        <a-entity id="torch-glow" position="0 0.055 0">
-          <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
-          <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
-        </a-entity>
-        <!-- Spotlight target — far forward so beam follows hand direction -->
-        <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
-        <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
-        <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
-                  torch-flicker="base:112; range:25; speed:2.5"
-                  torch-raycaster
-                  position="0 0.08 0"></a-entity>
+              torch-toggle audio-unlock-vr></a-entity>
+
+    <!-- Torch at rest. Reposition this entity to wherever the torch should sit
+         in the scene. On grip within ~0.25 m, torch-pickup reparents its
+         object3D onto the right controller at held pose (0 -0.07 0.05, -140 0 0). -->
+    <a-entity id="torch" position="0 0.56 -0.8" rotation="-90 0 0" torch-pickup>
+      <!-- Moonlight bounce inside torch so it toggles off with it -->
+      <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
+      <!-- Torch GLB model — matte, responds to torch light, no reflections -->
+      <a-entity id="torch-glb-entity" gltf-model="#torch-glb" scale="0.075 0.075 0.075" rotation="-90 0 0" position="0 0 0" matte-darken></a-entity>
+      <!-- Bulb glow — at the narrow angled tip (front, +Y) -->
+      <a-entity id="torch-glow" position="0 0.055 0">
+        <a-sphere radius="0.003" material="shader:standard; color:#ffb866; emissive:#ff7030; emissiveIntensity:3; roughness:0.3"></a-sphere>
+        <a-entity light="type:point; color:#ff9900; intensity:0.06; distance:0.4; decay:2"></a-entity>
       </a-entity>
+      <!-- Spotlight target — far forward so beam follows hand direction -->
+      <a-entity id="torch-beam-target" position="0 20 0"></a-entity>
+      <!-- Spotlight beam — directional so it doesn't flood the scene orange -->
+      <a-entity id="torch-point" light="type:spot; color:#ffc890; intensity:112; distance:10; decay:2; angle:15; penumbra:0.55; target:#torch-beam-target"
+                torch-flicker="base:112; range:25; speed:2.5"
+                position="0 0.08 0"></a-entity>
     </a-entity>
 
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v73</div>
+<div id="version-overlay">v74</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
