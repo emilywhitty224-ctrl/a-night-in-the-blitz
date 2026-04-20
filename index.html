@@ -282,38 +282,17 @@
         body.setAttribute('material', bodyMat);
         this.el.appendChild(body);
 
-        // Dorsal ballonet bulge — the characteristic "pregnancy" on top
-        var bulge = document.createElement('a-sphere');
-        bulge.setAttribute('radius', 1);
-        bulge.setAttribute('scale', (L * 0.42) + ' ' + (r * 0.5) + ' ' + (r * 0.9));
-        bulge.setAttribute('position', (L * 0.08) + ' ' + (r * 0.82) + ' 0');
-        bulge.setAttribute('segments-width', 18);
-        bulge.setAttribute('segments-height', 10);
-        bulge.setAttribute('material', bodyMat);
-        this.el.appendChild(bulge);
-
-        // Rounded nose cap — slightly fatter bow, separates silhouette from plain sphere
-        var nose = document.createElement('a-sphere');
-        nose.setAttribute('radius', 1);
-        nose.setAttribute('scale', (L * 0.18) + ' ' + (r * 1.06) + ' ' + (r * 1.06));
-        nose.setAttribute('position', (L * 0.88) + ' 0 0');
-        nose.setAttribute('segments-width', 18);
-        nose.setAttribute('segments-height', 12);
-        nose.setAttribute('material', bodyMat);
-        this.el.appendChild(nose);
-
-        // Three tail fins in classic Y-fin layout: top + lower-port + lower-starboard.
-        // Each fin lives inside a container rotated around the balloon's
-        // longitudinal (X) axis by 0° / 120° / -120°. The fin itself is an
-        // a-box pushed outward in +Y from the container so its base just kisses
-        // the hull after rotation. Box gives a crisp flat-plate silhouette
-        // (no cone-tail illusion like flattened spheres produced).
+        // Three tail fins — Y-layout (top, lower-port, lower-starboard).
+        // finAttachNorm is the normalised X position on the unit sphere, so
+        // hullR gives the exact hull radius there, keeping fins flush.
         var self = this;
-        var finLen   = L * 0.34;    // fore-aft length along balloon axis
-        var finTall  = r * 1.5;     // radial extent from hull outward
-        var finThick = 0.1;         // through-thickness
-        var finBaseR = r + finTall * 0.5; // center of fin from balloon axis
-        var finX     = -L * 0.82;   // longitudinal position (near tail)
+        var finAttachNorm = 0.75;
+        var hullR    = r * Math.sqrt(1 - finAttachNorm * finAttachNorm);
+        var finLen   = L * 0.28;
+        var finTall  = r * 0.9;
+        var finThick = 0.08;
+        var finBaseR = hullR + finTall * 0.5;
+        var finX     = -L * finAttachNorm;
         [0, 120, -120].forEach(function (deg) {
           var hub = document.createElement('a-entity');
           hub.setAttribute('position', finX + ' 0 0');
@@ -372,6 +351,8 @@
       schema: { speed: {default: 60} },
       init: function () {
         this._stickX = 0;
+        this._before = new THREE.Vector3();
+        this._after  = new THREE.Vector3();
         var self = this;
         function bind() {
           var rightCtrl = document.querySelector('[oculus-touch-controls*="right"]');
@@ -387,9 +368,15 @@
       },
       tick: function (t, dt) {
         if (Math.abs(this._stickX) < 0.15) return;
-        this.el.object3D.rotation.y -= THREE.MathUtils.degToRad(
-          this._stickX * this.data.speed * dt / 1000
-        );
+        var angle = THREE.MathUtils.degToRad(this._stickX * this.data.speed * dt / 1000);
+        var rig = this.el.object3D;
+        var cam = this._cam || (this._cam = document.getElementById('cam').object3D);
+        cam.getWorldPosition(this._before);
+        rig.rotation.y -= angle;
+        rig.updateMatrixWorld();
+        cam.getWorldPosition(this._after);
+        rig.position.x += this._before.x - this._after.x;
+        rig.position.z += this._before.z - this._after.z;
       }
     });
 
@@ -1535,7 +1522,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v70</div>
+<div id="version-overlay">v71</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
