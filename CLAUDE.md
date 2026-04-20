@@ -18,6 +18,11 @@
 - Push to: https://github.com/emilywhitty224-ctrl/a-night-in-the-blitz
 - Live URL: https://emilywhitty224-ctrl.github.io/a-night-in-the-blitz/
 
+### Versioning (every commit)
+- Before committing, bump the integer in `<div id="version-overlay">v<N></div>` by 1
+- Commit message subject must start with the matching `v<N> —`
+- The overlay number and the commit prefix must stay in lockstep — they're the on-screen version
+
 ## Scene
 - WWII London 1940, Blitz blackout night walking experience
 - Quest VR — must stay WebXR compatible
