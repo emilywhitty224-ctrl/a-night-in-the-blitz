@@ -448,6 +448,8 @@
         this.el.object3D.position.set(0, -0.07, 0.05);
         this.el.object3D.rotation.set(THREE.MathUtils.degToRad(-140), 0, 0);
         this._picked = true;
+        var hint = document.getElementById('torch-pickup-hint');
+        if (hint) hint.object3D.visible = false;
         try {
           var gp = hand.components['oculus-touch-controls'];
           if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
@@ -628,7 +630,7 @@
           filter.Q.value = 1.5;
           var gain = ctx.createGain();
           gain.gain.setValueAtTime(0, ctx.currentTime);
-          gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.25);
+          gain.gain.linearRampToValueAtTime(0.85, ctx.currentTime + 0.25);
           gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
           src.connect(filter);
           filter.connect(gain);
@@ -1430,10 +1432,10 @@
   <!-- Sky-dome fill — hemisphere wash so shadow sides aren't pitch black -->
   <a-entity light="type: hemisphere; color: #8096c8; groundColor: #0a0e18; intensity: 0.55"></a-entity>
   <!-- Blackout lamp lights — spotlights pointing straight down, light only reaches ground -->
-  <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
+  <a-light type="spot" color="#ffaa33" intensity="20" distance="8" decay="2" angle="35" penumbra="0.4"
            position="3.32 3.07 -19.04" target="#lamp-target-1"></a-light>
   <a-entity id="lamp-target-1" position="3.32 0 -19.04"></a-entity>
-  <a-light type="spot" color="#ffaa33" intensity="40" distance="8" decay="2" angle="35" penumbra="0.4"
+  <a-light type="spot" color="#ffaa33" intensity="20" distance="8" decay="2" angle="35" penumbra="0.4"
            position="15.36 2.74 -17.77" target="#lamp-target-2"></a-light>
   <a-entity id="lamp-target-2" position="15.36 0 -17.77"></a-entity>
 
@@ -1460,8 +1462,14 @@
   <!-- Torch — world-space fixed position. torch-pickup reparents onto the
        right controller when the player grips within 0.4 m.
        Must be at scene level (NOT inside #rig) so it stays put when walking. -->
-  <a-entity id="torch" position="-2.960 0.808 -3.235" rotation="2.6 -16.4 91.7"
+  <a-entity id="torch" position="-2.960 0.833 -3.235" rotation="2.6 -16.4 91.7"
             torch-pickup="threshold: 0.4">
+    <!-- Pickup hint — soft amber halo marking grab point, hidden after pickup -->
+    <a-entity id="torch-pickup-hint" position="0 0 0"
+              animation="property: scale; from: 0.85 0.85 0.85; to: 1.25 1.25 1.25; dur: 900; dir: alternate; loop: true; easing: easeInOutSine">
+      <a-sphere radius="0.022" material="shader:flat; color:#ffcc88; opacity:0.85; transparent:true; fog:false; depthWrite:false" no-fog></a-sphere>
+      <a-entity light="type:point; color:#ffcc88; intensity:0.5; distance:0.6; decay:2"></a-entity>
+    </a-entity>
     <!-- Moonlight bounce inside torch so it toggles off with it -->
     <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
     <!-- Torch GLB model — matte, responds to torch light, no reflections -->
@@ -1480,7 +1488,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v89</div>
+<div id="version-overlay">v90</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
