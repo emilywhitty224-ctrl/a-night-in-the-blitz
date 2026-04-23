@@ -280,6 +280,35 @@
       }
     });
 
+    // ── Specular tame — runs after night-darken/scene-materials-fix to kill
+    //    mirror-like reflections on wet cobbles, rubble, metal shutters, etc.
+    //    Clamps roughness up and metalness down on every mesh so moonlight no
+    //    longer produces bright specular streaks across the alley. Diffuse
+    //    colour / textures untouched, so buildings stay as-lit.
+    AFRAME.registerComponent('specular-tame', {
+      init: function () {
+        this.el.addEventListener('model-loaded', function (e) {
+          setTimeout(function () {
+            try {
+              var n = 0;
+              e.detail.model.traverse(function (node) {
+                if (!node.isMesh) return;
+                var mats = Array.isArray(node.material) ? node.material : [node.material];
+                mats.forEach(function (m) {
+                  if (!m || !('roughness' in m)) return;
+                  m.roughness = 0.92;
+                  m.metalness = 0.0;
+                  m.needsUpdate = true;
+                  n++;
+                });
+              });
+              console.log('[specular-tame] tamed ' + n + ' materials');
+            } catch(err) { console.warn('[specular-tame]', err); }
+          }, 50);
+        });
+      }
+    });
+
     // ── Barrage balloon builder — generates a historically convincing WWII
     //    balloon as child primitives: inflated cigar body, top ballonet bulge,
     //    rounded nose cap, three tapered tail fins (top + lower-port/starboard),
@@ -1194,7 +1223,7 @@
   </a-assets>
 
   <!-- Scene -->
-  <a-entity gltf-model="#scene-glb" night-darken scene-materials-fix gatehouse-fix position="0 0 0" scale="1 1 1"></a-entity>
+  <a-entity gltf-model="#scene-glb" night-darken scene-materials-fix specular-tame gatehouse-fix position="0 0 0" scale="1 1 1"></a-entity>
 
   <!-- Sky — dark blue night, moonlit rather than pitch black -->
   <a-sky color="#070c18"></a-sky>
@@ -1488,7 +1517,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v90</div>
+<div id="version-overlay">v91</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
