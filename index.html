@@ -14,6 +14,20 @@
       color: #88aacc; font-family: monospace; font-size: 13px;
       opacity: 0.75; pointer-events: none; z-index: 9999; user-select: none;
     }
+    #scene-loading {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 14px;
+      background: #000; color: #ffee88;
+      font-family: monospace; font-size: 16px; text-align: center;
+      transition: opacity 0.8s ease;
+    }
+    #scene-loading .dots::after {
+      content: ''; display: inline-block; width: 1.2em; text-align: left;
+      animation: dots 1.2s steps(4, end) infinite;
+    }
+    @keyframes dots { 0%{content:'';} 25%{content:'.';} 50%{content:'..';} 75%{content:'...';} 100%{content:'';} }
+    #scene-loading.hidden { opacity: 0; pointer-events: none; }
   </style>
 
   <script>
@@ -310,6 +324,114 @@
             } catch(err) { console.warn('[specular-tame]', err); }
           }, 50);
         });
+      }
+    });
+
+    // ── Torch calibrate — one-time tool for nailing the held-pose values.
+    //    Controls (right controller):
+    //      • B button        → toggle calibration on/off (HUD appears)
+    //      • Thumbstick click → cycle axis (pos.x/y/z, rot.x/y/z)
+    //    Controls (left controller):
+    //      • Thumbstick X (analog) → nudge the selected axis
+    //    While active and torch is held, edits go straight to the torch
+    //    object3D. The HUD in front of the camera shows live pos/rot so the
+    //    user can read off the final values and paste into torch-pickup's
+    //    `this.el.object3D.position.set(...)` + `rotation.set(...)` calls.
+    AFRAME.registerComponent('torch-calibrate', {
+      init: function () {
+        this._active = false;
+        this._axis = 0;
+        this._labels = ['pos.x', 'pos.y', 'pos.z', 'rot.x°', 'rot.y°', 'rot.z°'];
+        this._stickLX = 0;
+        var self = this;
+
+        function buzz(ctrl, amp, ms) {
+          try {
+            var gp = ctrl && ctrl.components && ctrl.components['oculus-touch-controls'];
+            if (gp && gp.controller && gp.controller.hapticActuators && gp.controller.hapticActuators[0]) {
+              gp.controller.hapticActuators[0].pulse(amp, ms);
+            }
+          } catch(e) {}
+        }
+
+        (function bind() {
+          var r = document.querySelector('[oculus-touch-controls*="right"]');
+          var l = document.querySelector('[oculus-touch-controls*="left"]');
+          if (!r || !l) { setTimeout(bind, 500); return; }
+
+          r.addEventListener('bbuttondown', function () {
+            self._active = !self._active;
+            var hud = document.getElementById('calibrate-readout');
+            if (hud) hud.setAttribute('visible', self._active);
+            buzz(r, self._active ? 0.7 : 0.2, 80);
+            if (self._active) console.log('[torch-calibrate] ON');
+            else self._log();
+          });
+
+          r.addEventListener('thumbstickdown', function () {
+            if (!self._active) return;
+            self._axis = (self._axis + 1) % 6;
+            buzz(r, 0.5, 40);
+          });
+
+          l.addEventListener('thumbstickmoved', function (e) {
+            self._stickLX = e.detail.x;
+          });
+          l.addEventListener('thumbstickup', function () {
+            self._stickLX = 0;
+          });
+        })();
+      },
+      tick: function (t, dt) {
+        if (!this._active) return;
+        var torch = document.getElementById('torch');
+        var hud = document.getElementById('calibrate-readout');
+        if (!torch) return;
+        var pickup = torch.components && torch.components['torch-pickup'];
+        if (!pickup || !pickup._picked) {
+          if (hud) hud.setAttribute('value', 'CALIBRATE\nGrab the torch first\n(press grip when near it)');
+          return;
+        }
+
+        if (Math.abs(this._stickLX) > 0.15) {
+          var step = (this._axis < 3) ? 0.002 : THREE.MathUtils.degToRad(0.4);
+          var delta = this._stickLX * step;
+          var obj = torch.object3D;
+          if (this._axis === 0) obj.position.x += delta;
+          else if (this._axis === 1) obj.position.y += delta;
+          else if (this._axis === 2) obj.position.z += delta;
+          else if (this._axis === 3) obj.rotation.x += delta;
+          else if (this._axis === 4) obj.rotation.y += delta;
+          else if (this._axis === 5) obj.rotation.z += delta;
+        }
+
+        if (hud) {
+          var obj = torch.object3D;
+          var lines = [
+            'CALIBRATE  (B: exit+log  stickR: next axis  stickL-X: nudge)',
+            '> ' + this._labels[this._axis],
+            'pos: ' + obj.position.x.toFixed(3) + '  ' +
+                     obj.position.y.toFixed(3) + '  ' +
+                     obj.position.z.toFixed(3),
+            'rot: ' + THREE.MathUtils.radToDeg(obj.rotation.x).toFixed(1) + '  ' +
+                     THREE.MathUtils.radToDeg(obj.rotation.y).toFixed(1) + '  ' +
+                     THREE.MathUtils.radToDeg(obj.rotation.z).toFixed(1) + '°'
+          ];
+          hud.setAttribute('value', lines.join('\n'));
+        }
+      },
+      _log: function () {
+        var torch = document.getElementById('torch');
+        if (!torch) return;
+        var obj = torch.object3D;
+        console.log('[torch-calibrate] final pose:');
+        console.log('  position.set(' +
+          obj.position.x.toFixed(4) + ', ' +
+          obj.position.y.toFixed(4) + ', ' +
+          obj.position.z.toFixed(4) + ')');
+        console.log('  rotation (deg): x=' + THREE.MathUtils.radToDeg(obj.rotation.x).toFixed(2) +
+          '  y=' + THREE.MathUtils.radToDeg(obj.rotation.y).toFixed(2) +
+          '  z=' + THREE.MathUtils.radToDeg(obj.rotation.z).toFixed(2));
       }
     });
 
@@ -1202,6 +1324,12 @@
               rc.set(new THREE.Vector3(0, 1.6, 0), new THREE.Vector3(0, 0, -1));
               rc.intersectObject(sceneEl.object3D, true);
             } catch(e) { console.warn('[warmup]', e); }
+            // Hide loading overlay once the GLB is fully parsed/Draco-decoded.
+            var loader = document.getElementById('scene-loading');
+            if (loader) {
+              loader.classList.add('hidden');
+              setTimeout(function () { if (loader.parentNode) loader.parentNode.removeChild(loader); }, 900);
+            }
           });
         });
       }
@@ -1210,11 +1338,18 @@
 </head>
 <body>
 
+<div id="scene-loading">
+  <div style="font-size:20px; letter-spacing:0.12em;">A NIGHT IN THE BLITZ</div>
+  <div>Loading the alley<span class="dots"></span></div>
+  <div style="font-size:12px; opacity:0.65;">first load can take 20–30 seconds</div>
+</div>
+
 <a-scene
   draco-loader
   raycaster-warmup
   distant-explosions
   sky-target
+  torch-calibrate
   fog="type: linear; color: #070c18; near: 8; far: 32"
   renderer="colorManagement: true; antialias: false; physicallyCorrectLights: true; exposure: 0.28; foveation: 1"
   background="color: #070c18"
@@ -1482,12 +1617,27 @@
          uncommenting the element below once the root cause is confirmed. -->
     <!-- <a-entity rain></a-entity> -->
 
-    <a-entity id="cam" camera look-controls position="0 1.6 0"></a-entity>
+    <a-entity id="cam" camera look-controls position="0 1.6 0">
+      <!-- Calibration HUD — only visible when torch-calibrate is active. -->
+      <a-text id="calibrate-readout" value="" visible="false"
+              position="0 -0.25 -0.6" scale="0.35 0.35 0.35" align="center"
+              color="#ffee88" side="double" baseline="top"
+              material="depthTest: false; transparent: true; opacity: 0.95"></a-text>
+    </a-entity>
 
     <a-entity oculus-touch-controls="hand: left; model: false" audio-unlock-vr></a-entity>
 
     <a-entity oculus-touch-controls="hand: right; model: false"
-              torch-toggle audio-unlock-vr></a-entity>
+              torch-toggle audio-unlock-vr>
+      <!-- Pickup hint — orb emitted from the right controller at the exact
+           local pose the torch will snap to on grab, so the user can visually
+           line their hand up with the real torch. Hidden once picked up. -->
+      <a-entity id="torch-pickup-hint" position="0 -0.07 0.05"
+                animation="property: scale; from: 0.85 0.85 0.85; to: 1.25 1.25 1.25; dur: 900; dir: alternate; loop: true; easing: easeInOutSine">
+        <a-sphere radius="0.02" material="shader:flat; color:#ffcc88; opacity:0.9; transparent:true; fog:false; depthWrite:false" no-fog></a-sphere>
+        <a-entity light="type:point; color:#ffcc88; intensity:0.4; distance:0.5; decay:2"></a-entity>
+      </a-entity>
+    </a-entity>
 
 
   </a-entity>
@@ -1497,12 +1647,6 @@
        Must be at scene level (NOT inside #rig) so it stays put when walking. -->
   <a-entity id="torch" position="-2.960 0.833 -3.235" rotation="2.6 -16.4 91.7"
             torch-pickup="threshold: 0.4">
-    <!-- Pickup hint — soft amber halo marking grab point, hidden after pickup -->
-    <a-entity id="torch-pickup-hint" position="0 0 0"
-              animation="property: scale; from: 0.85 0.85 0.85; to: 1.25 1.25 1.25; dur: 900; dir: alternate; loop: true; easing: easeInOutSine">
-      <a-sphere radius="0.022" material="shader:flat; color:#ffcc88; opacity:0.85; transparent:true; fog:false; depthWrite:false" no-fog></a-sphere>
-      <a-entity light="type:point; color:#ffcc88; intensity:0.5; distance:0.6; decay:2"></a-entity>
-    </a-entity>
     <!-- Moonlight bounce inside torch so it toggles off with it -->
     <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
     <!-- Torch GLB model — matte, responds to torch light, no reflections -->
@@ -1521,7 +1665,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v92</div>
+<div id="version-overlay">v93</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
@@ -1551,6 +1695,14 @@
   document.querySelector('a-scene').addEventListener('exit-vr', function() {
     document.getElementById('mode-panel').style.display = 'block';
   });
+
+  // Loading-overlay safety fallback — if model-loaded never fires (error, aborted
+  // download) we still clear the overlay after 90 s rather than leaving the user
+  // staring at "Loading…" indefinitely.
+  setTimeout(function () {
+    var loader = document.getElementById('scene-loading');
+    if (loader) loader.classList.add('hidden');
+  }, 90000);
 
   function _applySceneColors(r, g, b) {
     var sceneGlb = document.querySelector('[gltf-model="#scene-glb"]');
