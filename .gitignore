@@ -1,0 +1,7 @@
+# Blender source files — live on Desktop, not in the repo
+*.blend
+*.blend1
+*.blend.backup
+
+# macOS cruft
+.DS_Store
