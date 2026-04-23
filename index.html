@@ -1192,7 +1192,7 @@
   </a-assets>
 
   <!-- Scene -->
-  <a-entity gltf-model="#scene-glb" scene-materials-fix gatehouse-fix position="0 0 0" scale="1 1 1"></a-entity>
+  <a-entity gltf-model="#scene-glb" night-darken scene-materials-fix gatehouse-fix position="0 0 0" scale="1 1 1"></a-entity>
 
   <!-- Sky — dark blue night, moonlit rather than pitch black -->
   <a-sky color="#070c18"></a-sky>
@@ -1460,7 +1460,7 @@
   <!-- Torch — world-space fixed position. torch-pickup reparents onto the
        right controller when the player grips within 0.4 m.
        Must be at scene level (NOT inside #rig) so it stays put when walking. -->
-  <a-entity id="torch" position="-2.960 0.958 -3.235" rotation="2.6 -16.4 91.7"
+  <a-entity id="torch" position="-2.960 0.808 -3.235" rotation="2.6 -16.4 91.7"
             torch-pickup="threshold: 0.4">
     <!-- Moonlight bounce inside torch so it toggles off with it -->
     <a-entity light="type:directional; color:#8899cc; intensity:0.04" position="0.3 1 -0.2"></a-entity>
@@ -1480,7 +1480,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v88</div>
+<div id="version-overlay">v89</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
