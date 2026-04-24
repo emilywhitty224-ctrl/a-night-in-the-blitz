@@ -1395,6 +1395,37 @@
   <!-- Silhouette background buildings — forced pitch-black, unlit -->
   <a-entity id="silhouettes" gltf-model="#silhouettes-glb" silhouette-darken position="0 0 0"></a-entity>
 
+  <!-- ── End-cap silhouette rows — close the horizon gap at the far end and
+       back of the alley. Same near-black standard material as the GLB
+       silhouettes so they catch ambient/moonlight identically.
+       Each row sits ≥ 5 m clear of the existing scene geometry.
+       Heights are staggered to break up the roofline. ─────────────────── -->
+  <a-entity id="silhouette-endcaps">
+
+    <!-- Far end — spans the skyline looking down the alley (z ≈ −40) -->
+    <a-box position="-24  5.0 -40" width="5.5" height="10" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="-18  6.5 -40" width="5.5" height="13" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="-12  4.5 -40" width="5.5" height="9"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" -6  5.5 -40" width="5.5" height="11" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="  0  4.0 -40" width="5.5" height="8"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="  6  7.0 -40" width="5.5" height="14" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 12  5.0 -40" width="5.5" height="10" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 18  6.0 -40" width="5.5" height="12" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 24  4.5 -40" width="5.5" height="9"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+
+    <!-- Back end — spans the skyline looking back up the alley (z ≈ +10) -->
+    <a-box position="-24  6.0  10" width="5.5" height="12" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="-18  4.0  10" width="5.5" height="8"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="-12  5.5  10" width="5.5" height="11" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" -6  4.5  10" width="5.5" height="9"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="  0  7.0  10" width="5.5" height="14" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position="  6  5.0  10" width="5.5" height="10" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 12  6.5  10" width="5.5" height="13" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 18  5.0  10" width="5.5" height="10" depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+    <a-box position=" 24  4.5  10" width="5.5" height="9"  depth="7" material="color:#0b0f17; roughness:0.88; metalness:0; fog:true"></a-box>
+
+  </a-entity>
+
   <!-- Sky — dark blue night, moonlit rather than pitch black -->
   <a-sky color="#070c18"></a-sky>
 
@@ -1696,7 +1727,7 @@
   </a-entity>
 
 </a-scene>
-<div id="version-overlay">v98</div>
+<div id="version-overlay">v99</div>
 
 <!-- ── Day/Night panel — desktop only, hidden in VR ─────────────────── -->
 <div id="mode-panel" style="
